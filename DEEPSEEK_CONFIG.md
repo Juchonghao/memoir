@@ -9,7 +9,7 @@
 在 Supabase Dashboard 中配置以下环境变量：
 
 ```bash
-OPENAI_API_KEY=sk_TE7oY9NwmQkxLt8Y_B61g5tLZJfvqHvbG9cVIGTmnh4
+OPENAI_API_KEY=your_deepseek_api_key_here
 OPENAI_BASE_URL=https://api.ppinfra.com/openai
 OPENAI_MODEL=deepseek/deepseek-r1
 OPENAI_MAX_TOKENS=512
@@ -27,7 +27,7 @@ OPENAI_MAX_TOKENS=512
 
    | 变量名 | 值 | 说明 |
    |--------|-----|------|
-   | `OPENAI_API_KEY` | `sk_TE7oY9NwmQkxLt8Y_B61g5tLZJfvqHvbG9cVIGTmnh4` | DeepSeek API密钥 |
+   | `OPENAI_API_KEY` | `your_deepseek_api_key_here` | DeepSeek API密钥 |
    | `OPENAI_BASE_URL` | `https://api.ppinfra.com/openai` | API基础URL |
    | `OPENAI_MODEL` | `deepseek/deepseek-r1` | 使用的模型 |
    | `OPENAI_MAX_TOKENS` | `512` | 最大token数（访谈问题） |
@@ -40,7 +40,7 @@ OPENAI_MAX_TOKENS=512
 
 ```bash
 # 设置环境变量
-supabase secrets set OPENAI_API_KEY=sk_TE7oY9NwmQkxLt8Y_B61g5tLZJfvqHvbG9cVIGTmnh4
+supabase secrets set OPENAI_API_KEY=your_deepseek_api_key_here
 supabase secrets set OPENAI_BASE_URL=https://api.ppinfra.com/openai
 supabase secrets set OPENAI_MODEL=deepseek/deepseek-r1
 supabase secrets set OPENAI_MAX_TOKENS=512
@@ -94,7 +94,7 @@ supabase secrets set OPENAI_MAX_TOKENS=512
 
 ```bash
 curl -X POST https://api.ppinfra.com/openai/v1/chat/completions \
-  -H "Authorization: Bearer sk_TE7oY9NwmQkxLt8Y_B61g5tLZJfvqHvbG9cVIGTmnh4" \
+  -H "Authorization: Bearer your_deepseek_api_key_here" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "deepseek/deepseek-r1",

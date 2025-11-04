@@ -66,3 +66,8 @@ jizhuanti-app/build/
 
 # ChatTTS patch file (包含敏感信息或本地修改)
 code/chattts_patch.py
+
+# Test scripts with potential API keys
+test_gemini_models.sh
+*_test.sh
+*test*.sh

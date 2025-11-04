@@ -1,15 +1,23 @@
 #!/bin/bash
-GEMINI_API_KEY=$(curl -s https://lafpbfjtbupootnpornv.supabase.co/functions/v1/ai-interviewer-smart \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhZnBiZmp0YnVwb290bnBvcm52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg0MzIxMzgsImV4cCI6MjA3NDAwODEzOH0.NdxDvO17UX2Cya0Uz3ECWkR3g5nEbpIcu5ISXPTvaQ8" \
-  -d '{"action": "getEnvInfo"}' | grep -oP '"apiKeyLength":\K[0-9]+')
+# ⚠️ 安全警告：此脚本不再包含硬编码的 API 密钥
+# 请使用环境变量或从 Supabase Secrets 获取密钥
 
-echo "API Key length: $GEMINI_API_KEY"
+# 从环境变量获取 API 密钥
+GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+
+if [ -z "$GEMINI_API_KEY" ]; then
+  echo "⚠️  错误: GEMINI_API_KEY 环境变量未设置"
+  echo "请设置环境变量: export GEMINI_API_KEY=your_api_key"
+  echo "或从 Supabase Secrets 获取密钥"
+  exit 1
+fi
+
+echo "API Key length: ${#GEMINI_API_KEY}"
 
 # 尝试列出v1版本的模型
 echo "=== Testing v1 API ==="
-curl -s "https://generativelanguage.googleapis.com/v1/models?key=AIzaSyBSz-vY8K3qU3_Y0pQoZ5FwX8k5n8yJ4Xk" | head -100
+curl -s "https://generativelanguage.googleapis.com/v1/models?key=${GEMINI_API_KEY}" | head -100
 
 # 尝试列出v1beta版本的模型
 echo -e "\n=== Testing v1beta API ==="
-curl -s "https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyBSz-vY8K3qU3_Y0pQoZ5FwX8k5n8yJ4Xk" | head -100
+curl -s "https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}" | head -100
