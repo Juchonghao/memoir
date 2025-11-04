@@ -1,0 +1,42 @@
+=== 智能对话测试 ===
+用户ID: 00000000-0000-0000-0000-000000000001
+章节: 童年故里
+
+【第1轮】获取初始问题...
+{
+    "question": "\u8bf7\u63cf\u8ff0\u4e00\u4e0b\u60a8\u7684\u7ae5\u5e74\u751f\u6d3b\u73af\u5883\uff0c\u6bd4\u5982\u4f4f\u5728\u54ea\u91cc\uff1f\u5bb6\u91cc\u6709\u54ea\u4e9b\u4eba\uff1f",
+    "roundNumber": 1,
+    "usingAI": true
+}
+AI问题1: 请描述一下您的童年生活环境，比如住在哪里？家里有哪些人？
+
+【第1轮】用户回答...
+用户: 我出生在江苏南京，家里有爷爷奶奶、父母还有妹妹。我们住在鼓楼区的一个老四合院里，那时候邻里关系特别好。
+{
+    "error": "Current question not found"
+}
+AI问题2: 
+
+【第2轮】用户回答...
+用户: 我印象最深的是爷爷。他是个老师，每天晚上都会给我们讲故事，教我们认字。他特别和蔼可亲。
+{
+    "error": "Internal server error",
+    "message": "Unexpected token ',', ...\"ndNumber\":,\"userAnsw\"... is not valid JSON",
+    "stack": "SyntaxError: Unexpected token ',', ...\"ndNumber\":,\"userAnsw\"... is not valid JSON\n    at parse (<anonymous>)\n    at packageData (ext:deno_fetch/22_body.js:408:14)\n    at consumeBody (ext:deno_fetch/22_body.js:261:12)\n    at eventLoopTick (ext:core/01_core.js:175:7)\n    at async Object.handler (file:///var/tmp/sb-compile-edge-runtime/source/index.ts:413:25)\n    at async mapped (ext:runtime/http.js:231:18)"
+}
+AI问题3: 
+
+【第3轮】用户回答...
+用户: 爷爷给我讲过很多历史故事，比如三国演义、水浒传。我记得有一次他讲诸葛亮草船借箭，我特别佩服诸葛亮的智慧。从那时起我就特别喜欢读书。
+{
+    "error": "Current question not found"
+}
+AI问题4: 
+
+=== 测试完成 ===
+
+【验证要点】
+1. AI是否理解用户回答内容？
+2. 生成的问题是否具有针对性和连贯性？
+3. 问题是否基于之前的回答进行深入追问？
+4. 语气是否温暖自然？

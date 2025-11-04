@@ -1,0 +1,86 @@
+{
+  "_source_id": 11,
+  "sources": {
+    "纪传体AI应用核心功能需求深度分析": {
+      "https://www.oryoy.com/news/wei-lai-yi-lai-chen-jin-shi-jiao-hu-ui-she-ji-xin-qu-shi-jie-mi-zhong-su-yong-hu-ti-yan-xin-pian-zha.html": {
+        "id": 1,
+        "publisher": "oryoy.com",
+        "url": "https://www.oryoy.com/news/wei-lai-yi-lai-chen-jin-shi-jiao-hu-ui-she-ji-xin-qu-shi-jie-mi-zhong-su-yong-hu-ti-yan-xin-pian-zha.html",
+        "title": "未来已来：沉浸式交互UI设计新趋势揭秘",
+        "info": "提取了沉浸式交互UI设计的核心技术（VR/AR、多模态交互、AI）、最新趋势（无界设计、五感设计、语音用户界面、跨设备协同）以及在游戏、教育、医疗、电商等领域的应用场景"
+      },
+      "https://blog.csdn.net/gitblog_00473/article/details/151852248": {
+        "id": 2,
+        "publisher": "CSDN博客",
+        "url": "https://blog.csdn.net/gitblog_00473/article/details/151852248",
+        "title": "3步打造专属AI作家：Storm风格迁移技术",
+        "info": "详细分析了Storm风格迁移技术的双阶段知识整合架构，包含语气特征提取器、多视角对话引擎、风格融合生成器三个核心模块，以及具体的技术实现步骤和参数配置"
+      },
+      "https://github.com/stylellm/stylellm_models": {
+        "id": 3,
+        "publisher": "GitHub",
+        "url": "https://github.com/stylellm/stylellm_models",
+        "title": "StyleLLM文风大模型：基于大语言模型的文本风格迁移项目",
+        "info": "获得了StyleLLM基于Yi-6b模型的技术架构、量化版本（4.2GB显存）、LLaMA-Factory训练框架，以及基于中国古典文学作品的训练方法和应用场景"
+      },
+      "https://cloud.tencent.com/developer/article/2566463": {
+        "id": 4,
+        "publisher": "腾讯云",
+        "url": "https://cloud.tencent.com/developer/article/2566463",
+        "title": "智能体记忆系统检索优化指南",
+        "info": "提取了智能体记忆系统检索优化的三大关键策略，包括混合检索架构、动态索引机制和多模态检索技术"
+      },
+      "https://developer.baidu.com/article/detail.html?id=3418804": {
+        "id": 5,
+        "publisher": "百度开发者中心",
+        "url": "https://developer.baidu.com/article/detail.html?id=3418804",
+        "title": "AI智能问答系统技术架构深度解析",
+        "info": "深入了解了AI智能问答系统的核心组件、工作流程以及在实际应用中的重要作用"
+      },
+      "https://zhuanlan.zhihu.com/p/258565534": {
+        "id": 6,
+        "publisher": "知乎",
+        "url": "https://zhuanlan.zhihu.com/p/258565534",
+        "title": "什么是MVP（最小可行性产品）？如何构建和验证MVP？",
+        "info": "获得了MVP构建的核心理念、三要素（Build-Measure-Learn）、功能优先级排序方法和用户体验设计原则"
+      }
+    },
+    "AI核心技术研究报告": {
+      "https://kunyun-tech.com/2025/05/11/GitHub-best-TTS-project/": {
+        "id": 7,
+        "publisher": "昆云科技",
+        "url": "https://kunyun-tech.com/2025/05/11/GitHub-best-TTS-project/",
+        "title": "2025年最佳开源离线TTS项目推荐：中文语音合成方案对比",
+        "info": "深入分析GitHub上最优秀的开源离线TTS项目，包括Coqui TTS、CosyVoice、Bark等7大方案对比，详细技术特点、性能表现和应用场景"
+      },
+      "https://developer.baidu.com/article/detail.html?id=4012550": {
+        "id": 8,
+        "publisher": "百度开发者中心",
+        "url": "https://developer.baidu.com/article/detail.html?id=4012550",
+        "title": "2025年AI语音克隆工具选型：技术、场景与成本全解析",
+        "info": "深度解析2025年主流AI语音克隆工具，从技术架构、应用场景、成本效益等维度提供选型指南，涵盖ElevenLabs、Resemble AI、华为云ModelArts TTS等"
+      },
+      "https://developer.aliyun.com/article/1599686": {
+        "id": 9,
+        "publisher": "阿里云开发者社区",
+        "url": "https://developer.aliyun.com/article/1599686",
+        "title": "Stable Diffusion超详细教程！从0-1入门到进阶",
+        "info": "提供Stable Diffusion AI绘画工具的超详细入门到进阶教程，包括本地部署、界面基础、模型选择、ControlNet安装与使用"
+      },
+      "https://zhuanlan.zhihu.com/p/1885618917550057149": {
+        "id": 10,
+        "publisher": "知乎",
+        "url": "https://zhuanlan.zhihu.com/p/1885618917550057149",
+        "title": "(更新中) 2025年发布的大模型汇总",
+        "info": "收集大语言模型，比较偏向开源的模型和SOTA闭源模型，按照发布时间排序"
+      },
+      "https://juejin.cn/post/7494157121387659273": {
+        "id": 11,
+        "publisher": "稀土掘金",
+        "url": "https://juejin.cn/post/7494157121387659273",
+        "title": "这个开源AI平台把文生图/音/字全包了！Pollinations.AI",
+        "info": "Pollinations.AI是一个开源的AI内容生成平台，提供免费且易于使用的文本和图像生成API，无需注册或API密钥"
+      }
+    }
+  }
+}

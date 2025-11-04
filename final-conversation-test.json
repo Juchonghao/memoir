@@ -1,0 +1,27 @@
+{
+  "test_rounds": [
+    {
+      "round": 1,
+      "action": "getNextQuestion",
+      "params": {"action":"getNextQuestion","userId":"00000000-0000-0000-0000-000000TEST01","chapter":"童年故里","sessionId":"00000000-0000-0000-0000-SESSION00001"}
+    },
+    {
+      "round": 1,
+      "action": "saveAnswer",
+      "userAnswer": "我出生在江苏南京，家里有爷爷奶奶、父母还有一个妹妹。我们住在鼓楼区的一个老四合院里，那时候邻里关系特别好，大家都像一家人一样。",
+      "params": {"action":"saveAnswer","userId":"00000000-0000-0000-0000-000000TEST01","chapter":"童年故里","sessionId":"00000000-0000-0000-0000-SESSION00001","roundNumber":1,"userAnswer":""}
+    },
+    {
+      "round": 2,
+      "action": "saveAnswer",
+      "userAnswer": "我印象最深的是爷爷。他是个老师，每天晚上都会给我们讲故事，教我们认字。他特别和蔼可亲，从来不发脾气，总是耐心地解答我的各种问题。",
+      "params": {"action":"saveAnswer","userId":"00000000-0000-0000-0000-000000TEST01","chapter":"童年故里","sessionId":"00000000-0000-0000-0000-SESSION00001","roundNumber":2,"userAnswer":""}
+    },
+    {
+      "round": 3,
+      "action": "saveAnswer",
+      "userAnswer": "爷爷给我讲过很多历史故事，比如三国演义、水浒传。我记得有一次他讲诸葛亮草船借箭，我特别佩服诸葛亮的智慧。从那时起我就特别喜欢读书，尤其是历史书。",
+      "params": {"action":"saveAnswer","userId":"00000000-0000-0000-0000-000000TEST01","chapter":"童年故里","sessionId":"00000000-0000-0000-0000-SESSION00001","roundNumber":3,"userAnswer":""}
+    }
+  ]
+}

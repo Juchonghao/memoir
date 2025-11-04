@@ -1,0 +1,43 @@
+==========================================
+开始对话流程测试
+用户ID: test_user_1761928018
+章节: 童年故里
+会话ID: session_1761928018
+==========================================
+
+【第1轮 - 获取初始问题】
+Response: {"error":"Database error","details":"invalid input syntax for type uuid: \"test_user_1761928018\""}
+AI问题: 
+轮次: 
+
+【第1轮 - 回答并获取下一个问题】
+Response: {"error":"Internal server error","message":"Unexpected token ',', ...\"dNumber\": ,\n    \"use\"... is not valid JSON","stack":"SyntaxError: Unexpected token ',', ...\"dNumber\": ,\n    \"use\"... is not valid JSON\n    at parse (<anonymous>)\n    at packageData (ext:deno_fetch/22_body.js:408:14)\n    at consumeBody (ext:deno_fetch/22_body.js:261:12)\n    at eventLoopTick (ext:core/01_core.js:175:7)\n    at async Object.handler (file:///var/tmp/sb-compile-edge-runtime/source/index.ts:413:25)\n    at async mapped (ext:runtime/http.js:231:18)"}
+用户回答: 我出生在江苏南京，家里有爷爷奶奶、父母还有一个妹妹。我们住在鼓楼区的一个老四合院里，那时候邻里关系特别好，大家都像一家人一样。
+AI问题: 
+轮次: 
+
+【第2轮 - 回答并获取下一个问题】
+Response: {"error":"Internal server error","message":"Unexpected token ',', ...\"dNumber\": ,\n    \"use\"... is not valid JSON","stack":"SyntaxError: Unexpected token ',', ...\"dNumber\": ,\n    \"use\"... is not valid JSON\n    at parse (<anonymous>)\n    at packageData (ext:deno_fetch/22_body.js:408:14)\n    at consumeBody (ext:deno_fetch/22_body.js:261:12)\n    at eventLoopTick (ext:core/01_core.js:175:7)\n    at async Object.handler (file:///var/tmp/sb-compile-edge-runtime/source/index.ts:413:25)\n    at async mapped (ext:runtime/http.js:231:18)"}
+用户回答: 我印象最深的是爷爷。他是个老师，每天晚上都会给我们讲故事，教我们认字。他特别和蔼，从来不发脾气，总是耐心地解答我的各种问题。
+AI问题: 
+轮次: 
+
+【第3轮 - 回答并获取下一个问题】
+Response: {"error":"Internal server error","message":"Unexpected token ',', ...\"dNumber\": ,\n    \"use\"... is not valid JSON","stack":"SyntaxError: Unexpected token ',', ...\"dNumber\": ,\n    \"use\"... is not valid JSON\n    at parse (<anonymous>)\n    at packageData (ext:deno_fetch/22_body.js:408:14)\n    at consumeBody (ext:deno_fetch/22_body.js:261:12)\n    at eventLoopTick (ext:core/01_core.js:175:7)\n    at async Object.handler (file:///var/tmp/sb-compile-edge-runtime/source/index.ts:413:25)\n    at async mapped (ext:runtime/http.js:231:18)"}
+用户回答: 爷爷给我讲过很多历史故事，比如三国演义、水浒传。我记得有一次他讲到诸葛亮草船借箭，我特别佩服诸葛亮的智慧。从那时起我就特别喜欢读书，尤其是历史书。
+AI问题: 
+轮次: 
+
+==========================================
+对话流程测试完成
+==========================================
+
+【测试要点检查】
+✓ AI是否能基于用户回答生成相关问题？
+  - 第1轮提到：南京鼓楼、四合院、爷爷奶奶
+  - 第2轮提到：爷爷是老师、讲故事
+  - 第3轮提到：三国演义、诸葛亮、喜欢读书
+
+✓ 问题是否具有连贯性和针对性？
+✓ 问题是否避免重复？
+✓ 语气是否温暖自然？

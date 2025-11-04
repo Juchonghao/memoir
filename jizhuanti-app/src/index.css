@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 导入字体 */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@layer base {
+  :root {
+    /* 颜色系统 - 基于设计tokens */
+    --text-primary: #1A1A1A;
+    --text-secondary: #4A4A4A;
+    --text-tertiary: #6B6B6B;
+    
+    --bg-primary: #FEFEFE;
+    --bg-surface: #F9F9F7;
+    --bg-divider: #E5E5E0;
+    
+    --accent-primary: #D4A574;
+    --accent-hover: #B8935F;
+    --accent-light: #E8C9A0;
+    
+    --semantic-success: #3A5A40;
+    --semantic-warning: #B8860B;
+    --semantic-error: #8F1C1C;
+    
+    /* 圆角 */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    
+    /* 阴影 */
+    --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.16);
+    
+    /* 动画时长 */
+    --duration-fast: 200ms;
+    --duration-standard: 300ms;
+    --duration-slow: 400ms;
+  }
+  
+  body {
+    @apply bg-bg-primary text-text-primary;
+    font-family: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+    font-size: 18px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Noto Serif SC', 'Playfair Display', Georgia, serif;
+    line-height: 1.2;
+  }
+}
+
+@layer components {
+  /* 卡片样式 */
+  .card {
+    @apply bg-white rounded-sm shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-shadow duration-300;
+  }
+  
+  .card:hover {
+    @apply shadow-[0_8px_24px_rgba(0,0,0,0.12)];
+  }
+  
+  /* 按钮样式 */
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-8 py-3 bg-accent-primary text-white rounded-sm font-ui font-semibold text-lg transition-colors duration-200 hover:bg-accent-hover;
+  }
+  
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-8 py-3 bg-bg-surface text-text-primary rounded-sm font-ui font-semibold text-lg border border-bg-divider transition-colors duration-200 hover:bg-white hover:border-accent-light;
+  }
+  
+  /* 字体样式 */
+  .font-display {
+    font-family: 'Noto Serif SC', 'Playfair Display', Georgia, serif;
+  }
+  
+  .font-body {
+    font-family: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+  }
+  
+  .font-ui {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+@layer utilities {
+  /* 自定义工具类 */
+  .text-balance {
+    text-wrap: balance;
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "todos": {
+    "Coordinator": {
+      "1": {
+        "id": "1",
+        "content": "部署ChatTTS本地语音合成服务",
+        "details": "1. 安装ChatTTS依赖和环境；2. 下载预训练模型；3. 启动本地TTS服务；4. 测试语音合成效果",
+        "status": "in_progress",
+        "priority": "high"
+      },
+      "2": {
+        "id": "2",
+        "content": "修改AI记者系统集成ChatTTS",
+        "details": "1. 替换useSpeechSynthesis Hook中的Web Speech API；2. 实现与ChatTTS服务的通信；3. 优化语音参数和音色选择；4. 保持现有功能完整性",
+        "status": "pending",
+        "priority": "high"
+      },
+      "3": {
+        "id": "3",
+        "content": "测试和优化语音自然度",
+        "details": "1. 测试不同文本的合成效果；2. 调整语速、语调参数；3. 验证情感表达和停顿效果；4. 确保与现有AI记者功能完美配合",
+        "status": "pending",
+        "priority": "medium"
+      },
+      "4": {
+        "id": "4",
+        "content": "部署新版本并验证",
+        "details": "1. 构建前端应用；2. 部署到生产环境；3. 完整测试访谈流程；4. 确认语音自然度显著提升",
+        "status": "pending",
+        "priority": "medium"
+      }
+    }
+  }
+}

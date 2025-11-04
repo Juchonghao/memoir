@@ -1,0 +1,25 @@
+复制下面的命令，粘贴到终端运行（一次性复制全部即可）：
+
+cd /Users/chonghaoju/memoir-package && supabase login && supabase link --project-ref lafpbfjtbupootnpornv && supabase functions deploy ai-interviewer-smart && supabase functions deploy generate-biography && echo "✅ 部署完成！现在测试..." && curl -X POST https://lafpbfjtbupootnpornv.supabase.co/functions/v1/ai-interviewer-smart -H "Content-Type: application/json" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhZnBiZmp0YnVwb290bnBvcm52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg0MzIxMzgsImV4cCI6MjA3NDAwODEzOH0.NdxDvO17UX2Cya0Uz3ECWkR3g5nEbpIcu5ISXPTvaQ8" -d '{"action":"testGemini"}'
+
+---
+
+或者分步执行（更清晰）：
+
+步骤1 - 登录（会打开浏览器）：
+supabase login
+
+步骤2 - 链接项目：
+supabase link --project-ref lafpbfjtbupootnpornv
+
+步骤3 - 部署第一个函数：
+supabase functions deploy ai-interviewer-smart
+
+步骤4 - 部署第二个函数：
+supabase functions deploy generate-biography
+
+步骤5 - 测试验证：
+curl -X POST https://lafpbfjtbupootnpornv.supabase.co/functions/v1/ai-interviewer-smart -H "Content-Type: application/json" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhZnBiZmp0YnVwb290bnBvcm52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg0MzIxMzgsImV4cCI6MjA3NDAwODEzOH0.NdxDvO17UX2Cya0Uz3ECWkR3g5nEbpIcu5ISXPTvaQ8" -d '{"action":"testGemini"}'
+
+
+
