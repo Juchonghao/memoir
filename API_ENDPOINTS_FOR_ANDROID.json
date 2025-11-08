@@ -1,0 +1,149 @@
+{
+  "apiInfo": {
+    "baseUrl": "https://your-project.supabase.co/functions/v1",
+    "apiKey": "your-anon-key-here",
+    "note": "请替换为实际的Supabase项目URL和API Key"
+  },
+  "endpoints": {
+    "interviewStart": {
+      "path": "/interview-start",
+      "method": "POST",
+      "description": "AI起始对话API - 持续对话",
+      "firstCall": {
+        "request": {
+          "userId": "string (required)",
+          "chapter": "string (required) - 可选值: 童年故里、青春之歌、事业征程、家庭港湾、流金岁月"
+        },
+        "response": {
+          "success": true,
+          "data": {
+            "question": "string - AI生成的问题",
+            "sessionId": "string - 会话ID，保存用于后续调用",
+            "roundNumber": 1,
+            "totalRounds": 1,
+            "missingThemes": ["string - 缺失的主题列表"],
+            "coverage": 0,
+            "suggestions": "string - 建议补充的内容"
+          }
+        }
+      },
+      "subsequentCalls": {
+        "request": {
+          "userId": "string (required)",
+          "chapter": "string (required)",
+          "sessionId": "string (required) - 从第一次响应获取",
+          "userAnswer": "string (required) - 用户的回答",
+          "roundNumber": "integer (required) - 从上次响应获取"
+        },
+        "response": {
+          "success": true,
+          "data": {
+            "question": "string - 下一个问题",
+            "sessionId": "string - 相同的sessionId",
+            "roundNumber": 2,
+            "totalRounds": 2,
+            "missingThemes": ["string"],
+            "coverage": 20,
+            "suggestions": "string"
+          }
+        }
+      }
+    },
+    "memoirGenerate": {
+      "path": "/memoir-generate",
+      "method": "POST",
+      "description": "生成回忆录API",
+      "request": {
+        "userId": "string (required)",
+        "chapter": "string (optional) - 不传则生成所有章节",
+        "writingStyle": "string (required) - 可选值: moyan, liucixin, yiqiuyu, default",
+        "title": "string (optional) - 默认: 我的人生故事",
+        "saveToDatabase": "boolean (optional) - 默认: true"
+      },
+      "response": {
+        "success": true,
+        "data": {
+          "title": "string - 回忆录标题",
+          "content": "string - 纯文本内容",
+          "html": "string - 完整的HTML格式",
+          "wordCount": 2500,
+          "writingStyle": "string",
+          "chapter": "string",
+          "generatedAt": "string - ISO 8601格式"
+        }
+      }
+    },
+    "apiGateway": {
+      "path": "/api-gateway/api/v1",
+      "method": "POST",
+      "description": "统一API网关（可选）",
+      "note": "通过网关访问时，userId会自动从认证token中提取"
+    }
+  },
+  "chapters": [
+    {
+      "id": "童年故里",
+      "name": "童年故里",
+      "description": "童年时期的成长经历、家庭环境、故乡记忆"
+    },
+    {
+      "id": "青春之歌",
+      "name": "青春之歌",
+      "description": "青少年时期的学习、成长、梦想和转折"
+    },
+    {
+      "id": "事业征程",
+      "name": "事业征程",
+      "description": "工作生涯、职业发展、事业成就"
+    },
+    {
+      "id": "家庭港湾",
+      "name": "家庭港湾",
+      "description": "家庭生活、婚姻家庭、亲情关系"
+    },
+    {
+      "id": "流金岁月",
+      "name": "流金岁月",
+      "description": "退休生活、人生感悟、经验智慧"
+    }
+  ],
+  "writingStyles": [
+    {
+      "id": "moyan",
+      "name": "莫言",
+      "description": "乡土魔幻风格 - 运用感官细节、乡土语言、魔幻现实主义手法"
+    },
+    {
+      "id": "liucixin",
+      "name": "刘慈欣",
+      "description": "宏大叙事风格 - 理性思维、宏观视角、科技与人文结合"
+    },
+    {
+      "id": "yiqiuyu",
+      "name": "余秋雨",
+      "description": "文化哲思风格 - 文化意象、历史典故、沉静思辨"
+    },
+    {
+      "id": "default",
+      "name": "默认",
+      "description": "温暖叙事、文学化表达"
+    }
+  ],
+  "authentication": {
+    "type": "Bearer Token",
+    "header": "Authorization",
+    "format": "Bearer {apiKey}",
+    "note": "所有API请求都需要在Header中添加Authorization"
+  },
+  "errorCodes": {
+    "BAD_REQUEST": "请求参数错误",
+    "UNAUTHORIZED": "认证失败",
+    "NOT_FOUND": "资源不存在",
+    "INTERNAL_ERROR": "服务器内部错误"
+  },
+  "testing": {
+    "testScript": "bash test-conversation-flow.sh",
+    "testDocumentation": "CONVERSATION_FLOW_TEST.md"
+  }
+}
+

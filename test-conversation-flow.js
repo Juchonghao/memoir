@@ -3,7 +3,8 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
 const API_KEY = process.env.SUPABASE_ANON_KEY || 'your-anon-key';
-const USER_ID = process.env.TEST_USER_ID || 'test-user-id';
+// 生成有效的UUID作为测试用户ID（如果未提供）
+const USER_ID = process.env.TEST_USER_ID || '550e8400-e29b-41d4-a716-446655440000';
 const CHAPTER = '童年故里';
 
 // 颜色输出（Node.js）

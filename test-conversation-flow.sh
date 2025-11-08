@@ -6,7 +6,18 @@
 # 配置
 SUPABASE_URL="${SUPABASE_URL:-https://your-project.supabase.co}"
 API_KEY="${SUPABASE_ANON_KEY:-your-anon-key}"
-USER_ID="${TEST_USER_ID:-test-user-id}"
+# 生成有效的UUID作为测试用户ID（如果未提供）
+if [ -z "$TEST_USER_ID" ]; then
+    # 使用uuidgen或生成一个固定的测试UUID
+    if command -v uuidgen &> /dev/null; then
+        USER_ID=$(uuidgen)
+    else
+        # 使用固定的测试UUID（格式正确）
+        USER_ID="550e8400-e29b-41d4-a716-446655440000"
+    fi
+else
+    USER_ID="$TEST_USER_ID"
+fi
 CHAPTER="童年故里"
 
 # 颜色输出
