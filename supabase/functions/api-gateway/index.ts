@@ -731,6 +731,92 @@ ${JSON.stringify(interviewData, null, 2)}
     return successResponse({ chapters });
   }
 
+  // ========== AI访谈 API ==========
+
+  // POST /api/v1/interview/start - AI起始对话，检测内容缺失
+  if (path === '/interview/start' && req.method === 'POST') {
+    try {
+      const { chapter, sessionId, userAnswer, roundNumber } = await req.json();
+
+      if (!chapter) {
+        return errorResponse('BAD_REQUEST', 'chapter is required');
+      }
+
+      // 调用interview-start Edge Function
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const functionUrl = `${supabaseUrl}/functions/v1/interview-start`;
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+      const functionResponse = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`
+        },
+        body: JSON.stringify({
+          userId,
+          chapter,
+          sessionId,
+          userAnswer,
+          roundNumber
+        })
+      });
+
+      const functionData = await functionResponse.json();
+      
+      if (!functionResponse.ok) {
+        return errorResponse('INTERNAL_ERROR', 'Failed to start interview', functionData, 500);
+      }
+
+      return successResponse(functionData.data || functionData);
+    } catch (error: any) {
+      return errorResponse('INTERNAL_ERROR', 'Failed to start interview', error.message, 500);
+    }
+  }
+
+  // ========== 回忆录生成 API ==========
+
+  // POST /api/v1/memoir/generate - 生成回忆录，返回webUI格式
+  if (path === '/memoir/generate' && req.method === 'POST') {
+    try {
+      const { chapter, writingStyle, title, saveToDatabase } = await req.json();
+
+      if (!writingStyle) {
+        return errorResponse('BAD_REQUEST', 'writingStyle is required');
+      }
+
+      // 调用memoir-generate Edge Function
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const functionUrl = `${supabaseUrl}/functions/v1/memoir-generate`;
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+      const functionResponse = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`
+        },
+        body: JSON.stringify({
+          userId,
+          chapter,
+          writingStyle,
+          title,
+          saveToDatabase
+        })
+      });
+
+      const functionData = await functionResponse.json();
+      
+      if (!functionResponse.ok) {
+        return errorResponse('INTERNAL_ERROR', 'Failed to generate memoir', functionData, 500);
+      }
+
+      return successResponse(functionData.data || functionData);
+    } catch (error: any) {
+      return errorResponse('INTERNAL_ERROR', 'Failed to generate memoir', error.message, 500);
+    }
+  }
+
   // ========== 404 ==========
   return errorResponse('NOT_FOUND', `Route ${path} not found`, null, 404);
 }
