@@ -127,6 +127,44 @@ async function callLLM(prompt: string, systemPrompt: string = ''): Promise<strin
   return data.choices[0].message.content.trim();
 }
 
+// 主题关键词映射 - 用于简单的关键词匹配（备用方案）
+const themeKeywords: Record<string, string[]> = {
+  '家庭背景': ['家庭', '家人', '父母', '兄弟姐妹', '家里', '家', '成员'],
+  '童年趣事': ['玩', '游戏', '捉迷藏', '有趣', '开心', '乐趣', '开心', '一起玩'],
+  '成长环境': ['农村', '院子', '环境', '居住', '住', '生活', '地方', '环境'],
+  '早期教育': ['学校', '教育', '学习', '读书', '上学', '课堂', '老师'],
+  '故乡印象': ['故乡', '家乡', '老家', '村子', '农村', '地方'],
+  '父母关系': ['父母', '父亲', '母亲', '爸爸', '妈妈', '父', '母', '家长'],
+  '兄弟姐妹': ['兄弟姐妹', '兄弟', '姐妹', '哥哥', '姐姐', '弟弟', '妹妹'],
+  '童年玩伴': ['玩伴', '朋友', '一起玩', '同伴', '小伙伴'],
+  '学校生活': ['学校', '上学', '课堂', '同学', '校园'],
+  '家乡变化': ['变化', '以前', '现在', '过去', '改变']
+};
+
+// 简单的关键词匹配函数
+function matchThemesByKeywords(text: string, themes: string[]): string[] {
+  const matched: string[] = [];
+  const lowerText = text.toLowerCase();
+  
+  for (const theme of themes) {
+    const keywords = themeKeywords[theme] || [];
+    // 如果主题名称本身在文本中，也算匹配
+    if (lowerText.includes(theme.toLowerCase())) {
+      matched.push(theme);
+      continue;
+    }
+    // 检查关键词
+    for (const keyword of keywords) {
+      if (lowerText.includes(keyword.toLowerCase())) {
+        matched.push(theme);
+        break;
+      }
+    }
+  }
+  
+  return matched;
+}
+
 // 检测大类内容缺失
 async function detectMissingThemes(
   userId: string,
@@ -150,15 +188,26 @@ async function detectMissingThemes(
     });
   }
 
-    // 从对话历史中提取主题（使用LLM分析）
-    if (history && history.length > 0) {
+  // 从对话历史中提取主题
+  if (history && history.length > 0) {
+    // 方法1：尝试使用LLM分析（更准确）
+    let llmSuccess = false;
+    let llmError: any = null;
+    
+    // 检查 API key 是否配置
+    const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
+    if (!apiKey) {
+      console.warn('LLM API key not configured, skipping LLM analysis');
+    } else {
       try {
         const historyText = history
           .slice(-10) // 最近10轮对话
           .map((h: any) => `问：${h.question || h.ai_question}\n答：${h.answer || h.user_answer}`)
           .join('\n\n');
 
-      const analysisPrompt = `请分析以下对话内容，提取已讨论的主题关键词（从以下主题列表中选择）：
+        console.log(`开始LLM主题分析，对话历史长度: ${historyText.length} 字符`);
+
+        const analysisPrompt = `请分析以下对话内容，提取已讨论的主题关键词（从以下主题列表中选择）：
       
 对话内容：
 ${historyText}
@@ -173,23 +222,59 @@ ${config.requiredThemes.join('、')}
 
 只输出JSON，不要其他内容。`;
 
-      const analysisResult = await callLLM(
-        analysisPrompt,
-        '你是一个专业的主题分析助手，擅长从对话中提取关键主题。'
-      );
+        const analysisResult = await callLLM(
+          analysisPrompt,
+          '你是一个专业的主题分析助手，擅长从对话中提取关键主题。'
+        );
 
-      // 解析JSON
-      const jsonMatch = analysisResult.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.themes && Array.isArray(parsed.themes)) {
-          parsed.themes.forEach((theme: string) => {
-            discussedThemes.add(theme);
-          });
+        console.log('LLM分析结果:', analysisResult.substring(0, 200));
+
+        // 解析JSON
+        const jsonMatch = analysisResult.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.themes && Array.isArray(parsed.themes) && parsed.themes.length > 0) {
+              parsed.themes.forEach((theme: string) => {
+                // 验证主题是否在配置的主题列表中
+                if (config.requiredThemes.includes(theme)) {
+                  discussedThemes.add(theme);
+                } else {
+                  console.warn(`LLM返回的主题不在配置列表中: ${theme}`);
+                }
+              });
+              llmSuccess = true;
+              console.log('✓ LLM主题分析成功，识别到主题:', Array.from(discussedThemes));
+            } else {
+              console.warn('LLM返回的JSON中没有themes数组或数组为空');
+            }
+          } catch (parseError) {
+            console.error('JSON解析失败:', parseError);
+            console.error('尝试解析的内容:', jsonMatch[0]);
+          }
+        } else {
+          console.warn('LLM返回结果中没有找到JSON格式');
         }
+      } catch (error) {
+        llmError = error;
+        console.error('LLM分析出错:', error);
+        console.error('错误详情:', error instanceof Error ? error.message : String(error));
       }
-    } catch (error) {
-      console.error('Error analyzing themes:', error);
+    }
+    
+    // 方法2：如果LLM失败，使用关键词匹配（备用方案）
+    if (!llmSuccess) {
+      const reason = !apiKey ? 'API key未配置' : llmError ? `LLM调用失败: ${llmError instanceof Error ? llmError.message : String(llmError)}` : '未识别到有效主题';
+      console.log(`使用关键词匹配备用方案 (原因: ${reason})`);
+      
+      const allText = history
+        .slice(-10)
+        .map((h: any) => `${h.question || h.ai_question} ${h.answer || h.user_answer}`)
+        .join(' ');
+      
+      const matchedThemes = matchThemesByKeywords(allText, config.requiredThemes);
+      matchedThemes.forEach(theme => discussedThemes.add(theme));
+      console.log('✓ 关键词匹配识别到主题:', Array.from(discussedThemes));
     }
   }
 
@@ -198,7 +283,9 @@ ${config.requiredThemes.join('、')}
     theme => !discussedThemes.has(theme)
   );
 
-  const coverage = ((config.requiredThemes.length - missingThemes.length) / config.requiredThemes.length) * 100;
+  const coverage = Math.round(((config.requiredThemes.length - missingThemes.length) / config.requiredThemes.length) * 100);
+
+  console.log(`覆盖率计算: 总主题数=${config.requiredThemes.length}, 已讨论=${discussedThemes.size}, 缺失=${missingThemes.length}, 覆盖率=${coverage}%`);
 
   return { missingThemes, coverage };
 }
@@ -292,8 +379,18 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Supabase 平台会自动验证 Authorization header
+    // 我们只需要确保有 header，具体的验证由平台处理
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      console.warn('Missing Authorization header');
+      // 不直接拒绝，让 Supabase 平台处理（某些配置可能允许匿名访问）
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    // 使用 service role key 创建客户端（需要绕过 RLS）
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
     const requestData = await req.json();
@@ -356,29 +453,36 @@ Deno.serve(async (req) => {
     // 如果用户提供了回答，先保存回答
     if (userAnswer && roundNumber !== undefined) {
       // 更新或插入回答（适配不同的表结构）
-      // 先尝试包含session_id的更新
-      let updateData: any = { answer: userAnswer };
+      // 优先使用新列名（user_answer），如果失败再尝试旧列名（answer）
+      let updateData: any = { user_answer: userAnswer };
       
-      const { error: updateError } = await supabase
+      let updateError = null;
+      let updateResult = await supabase
         .from('conversation_history')
         .update(updateData)
         .eq('user_id', userId)
         .eq('chapter', chapter)
-        .eq('round_number', roundNumber)
-        .then(result => result)
-        .catch(async (err) => {
-          // 如果包含session_id的更新失败，尝试不包含session_id
-          console.log('Update with session_id failed, trying without session_id');
-          return await supabase
-            .from('conversation_history')
-            .update(updateData)
-            .eq('user_id', userId)
-            .eq('chapter', chapter)
-            .eq('round_number', roundNumber);
-        });
+        .eq('round_number', roundNumber);
+      
+      updateError = updateResult.error;
+      
+      // 如果使用新列名失败，尝试使用旧列名
+      if (updateError && (updateError.message?.includes('user_answer') || updateError.message?.includes('column'))) {
+        console.log('Update with user_answer failed, trying answer');
+        updateData = { answer: userAnswer };
+        updateResult = await supabase
+          .from('conversation_history')
+          .update(updateData)
+          .eq('user_id', userId)
+          .eq('chapter', chapter)
+          .eq('round_number', roundNumber);
+        updateError = updateResult.error;
+      }
 
       if (updateError) {
         console.error('Error updating answer:', updateError);
+      } else {
+        console.log('✓ Answer updated successfully');
       }
 
       // 更新摘要（简化版）
@@ -406,28 +510,51 @@ Deno.serve(async (req) => {
 
     // 保存新问题到数据库（适配不同的表结构）
     const nextRoundNumber = (history?.length || 0) + 1;
-    const insertData: any = {
+    
+    // 优先使用新列名（ai_question, user_answer），如果失败再尝试旧列名（question, answer）
+    let insertData: any = {
       user_id: userId,
       chapter: chapter,
       round_number: nextRoundNumber,
-      question: question, // 使用question字段
-      answer: '', // 使用answer字段
+      ai_question: question, // 优先使用新列名
+      user_answer: '', // 优先使用新列名
       created_at: new Date().toISOString()
     };
     
     // 尝试插入包含session_id的数据
-    // 如果失败，尝试不包含session_id
-    const { error: insertError } = await supabase
+    let insertError = null;
+    let insertResult = await supabase
       .from('conversation_history')
-      .insert({ ...insertData, session_id: actualSessionId })
-      .then(result => result)
-      .catch(async (err) => {
-        // 如果包含session_id的插入失败，尝试不包含session_id
-        console.log('Insert with session_id failed, trying without session_id');
-        return await supabase
-          .from('conversation_history')
-          .insert(insertData);
-      });
+      .insert({ ...insertData, session_id: actualSessionId });
+    
+    insertError = insertResult.error;
+    
+    // 如果使用新列名失败，尝试使用旧列名
+    if (insertError && (insertError.message?.includes('ai_question') || insertError.message?.includes('user_answer') || insertError.message?.includes('column'))) {
+      console.log('Insert with ai_question/user_answer failed, trying question/answer');
+      insertData = {
+        user_id: userId,
+        chapter: chapter,
+        round_number: nextRoundNumber,
+        question: question, // 使用旧列名
+        answer: '', // 使用旧列名
+        created_at: new Date().toISOString()
+      };
+      
+      insertResult = await supabase
+        .from('conversation_history')
+        .insert({ ...insertData, session_id: actualSessionId });
+      insertError = insertResult.error;
+    }
+    
+    // 如果包含session_id的插入失败，尝试不包含session_id
+    if (insertError && insertError.message?.includes('session_id')) {
+      console.log('Insert with session_id failed, trying without session_id');
+      insertResult = await supabase
+        .from('conversation_history')
+        .insert(insertData);
+      insertError = insertResult.error;
+    }
 
     if (insertError) {
       console.error('Error inserting question:', insertError);
