@@ -431,6 +431,16 @@ Deno.serve(async (req) => {
 
     if (insertError) {
       console.error('Error inserting question:', insertError);
+      // 如果插入失败，返回错误而不是静默忽略
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Failed to save conversation',
+          message: insertError.message,
+          details: 'Database insert failed. Please check table structure.'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // 返回响应

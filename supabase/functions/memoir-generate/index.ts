@@ -325,6 +325,7 @@ Deno.serve(async (req) => {
     }
 
     // 获取对话历史
+    // 尝试查询，处理可能的列名差异（question/answer vs ai_question/user_answer）
     let query = supabase
       .from('conversation_history')
       .select('*')
@@ -338,23 +339,80 @@ Deno.serve(async (req) => {
     const { data: conversations, error: conversationsError } = await query;
 
     if (conversationsError) {
-      throw conversationsError;
+      console.error('Error querying conversation_history:', conversationsError);
+      // 尝试更详细的错误信息
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Database query error',
+          message: conversationsError.message,
+          details: `Failed to query conversations for user ${userId}${chapter ? `, chapter ${chapter}` : ''}`
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (!conversations || conversations.length === 0) {
+      // 添加调试信息：检查是否有任何对话记录
+      const { data: allConversations, error: checkError } = await supabase
+        .from('conversation_history')
+        .select('id, user_id, chapter, round_number')
+        .eq('user_id', userId)
+        .limit(5);
+      
+      console.log(`No conversations found for user ${userId}${chapter ? `, chapter ${chapter}` : ''}`);
+      if (!checkError && allConversations && allConversations.length > 0) {
+        console.log(`Found ${allConversations.length} conversations for user, but none match the criteria`);
+        console.log('Sample conversations:', JSON.stringify(allConversations, null, 2));
+      }
+      
       return new Response(
         JSON.stringify({ 
           success: false, 
           error: 'No conversation data found',
-          message: chapter ? `No conversations found for chapter: ${chapter}` : 'No conversations found for user'
+          message: chapter ? `No conversations found for chapter: ${chapter}` : 'No conversations found for user',
+          debug: {
+            userId,
+            chapter: chapter || 'all',
+            totalConversationsForUser: allConversations?.length || 0
+          }
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log(`Found ${conversations.length} conversations for user ${userId}${chapter ? `, chapter ${chapter}` : ''}`);
+
+    // 过滤出有完整问答的对话（适配不同的列名）
+    const validConversations = conversations.filter(c => {
+      const hasQuestion = !!(c.question || c.ai_question);
+      const hasAnswer = !!(c.answer || c.user_answer);
+      return hasQuestion && hasAnswer;
+    });
+
+    if (validConversations.length === 0) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'No valid conversation data found',
+          message: 'Found conversations but none have both question and answer',
+          debug: {
+            userId,
+            chapter: chapter || 'all',
+            totalConversations: conversations.length,
+            conversationsWithQuestions: conversations.filter(c => !!(c.question || c.ai_question)).length,
+            conversationsWithAnswers: conversations.filter(c => !!(c.answer || c.user_answer)).length
+          }
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Using ${validConversations.length} valid conversations (with both Q&A) out of ${conversations.length} total`);
+
     // 生成回忆录内容
     const memoirContent = await generateMemoir(
-      conversations,
+      validConversations,
       writingStyle || 'default',
       title || '我的人生故事',
       chapter
