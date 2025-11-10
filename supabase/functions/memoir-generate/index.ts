@@ -23,10 +23,20 @@ async function generateMemoir(
   title: string,
   chapter?: string
 ): Promise<string> {
-  const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) {
-    throw new Error('API key not configured');
+  // 获取 API key，去除前后空格
+  let apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
+  if (apiKey) {
+    apiKey = apiKey.trim();
   }
+  
+  if (!apiKey || apiKey.length === 0) {
+    console.error('LLM API key not configured. Please set OPENAI_API_KEY or GEMINI_API_KEY environment variable.');
+    throw new Error('LLM API key not configured. Please configure OPENAI_API_KEY or GEMINI_API_KEY in Supabase project settings.');
+  }
+
+  // 记录配置信息（不记录完整 key）
+  const apiKeyPrefix = apiKey.substring(0, 8) + '...';
+  console.log(`Using LLM API: baseUrl=${Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai'}, model=${Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1'}, apiKey=${apiKeyPrefix}`);
 
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
   const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1';
@@ -83,7 +93,18 @@ ${JSON.stringify(interviewData, null, 2)}
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+    console.error(`LLM API call failed: status=${response.status}, error=${errorText}`);
+    
+    // 提供更友好的错误信息
+    if (response.status === 401) {
+      throw new Error(`LLM API authentication failed (401). Please check if your API key is valid and correctly configured in Supabase project settings. Error details: ${errorText}`);
+    } else if (response.status === 403) {
+      throw new Error(`LLM API access forbidden (403). Please check your API key permissions. Error details: ${errorText}`);
+    } else if (response.status === 429) {
+      throw new Error(`LLM API rate limit exceeded (429). Please try again later. Error details: ${errorText}`);
+    } else {
+      throw new Error(`LLM API error (${response.status}): ${errorText}`);
+    }
   }
 
   const data = await response.json();
