@@ -11,7 +11,7 @@
 ```bash
 OPENAI_API_KEY=your_deepseek_api_key_here
 OPENAI_BASE_URL=https://api.ppinfra.com/openai
-OPENAI_MODEL=deepseek/deepseek-r1
+OPENAI_MODEL=deepseek/deepseek-v3
 OPENAI_MAX_TOKENS=512
 ```
 

@@ -16,6 +16,40 @@ const stylePrompts: Record<string, string> = {
   'default': '温暖叙事、文学化表达'
 };
 
+// 清理LLM返回内容中的思考部分
+function cleanThinkingContent(content: string): string {
+  let cleaned = content;
+  
+  // 移除各种思考标记及其内容（使用非贪婪匹配）
+  // 匹配 <think>...</think> 及其变体
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '');
+  cleaned = cleaned.replace(/<\/?redacted_reasoning[^>]*>/gi, '');
+  
+  // 匹配 <thinking>...</thinking>
+  cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+  cleaned = cleaned.replace(/<\/?thinking[^>]*>/gi, '');
+  
+  // 匹配 <reasoning>...</reasoning>
+  cleaned = cleaned.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '');
+  cleaned = cleaned.replace(/<\/?reasoning[^>]*>/gi, '');
+  
+  // 匹配 <thought>...</thought>
+  cleaned = cleaned.replace(/<thought>[\s\S]*?<\/thought>/gi, '');
+  cleaned = cleaned.replace(/<\/?thought[^>]*>/gi, '');
+  
+  // 匹配 <think>...</think>
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  cleaned = cleaned.replace(/<\/?think[^>]*>/gi, '');
+  
+  // 清理多余的空白行（连续3个或更多换行符）
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  // 清理开头和结尾的空白
+  cleaned = cleaned.trim();
+  
+  return cleaned;
+}
+
 // 调用LLM API生成回忆录
 async function generateMemoir(
   conversations: any[],
@@ -39,7 +73,7 @@ async function generateMemoir(
   console.log(`Using LLM API: baseUrl=${Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai'}, model=${Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1'}, apiKey=${apiKeyPrefix}`);
 
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
-  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1';
+  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-v3';
   const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '4000');
 
   // 构建访谈数据（适配不同的表结构）
@@ -112,7 +146,16 @@ ${JSON.stringify(interviewData, null, 2)}
     throw new Error('LLM API returned no choices');
   }
 
-  return data.choices[0].message.content.trim();
+  const rawContent = data.choices[0].message.content.trim();
+  
+  // 清理思考内容
+  const cleanedContent = cleanThinkingContent(rawContent);
+  
+  if (cleanedContent !== rawContent) {
+    console.log(`[CLEAN] 已清理思考内容, 原始长度=${rawContent.length}, 清理后长度=${cleanedContent.length}`);
+  }
+  
+  return cleanedContent;
 }
 
 // 生成webUI格式的HTML

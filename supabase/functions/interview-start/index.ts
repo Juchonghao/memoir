@@ -82,16 +82,19 @@ const chapterConfig = {
   }
 };
 
-// 调用LLM API
-async function callLLM(prompt: string, systemPrompt: string = ''): Promise<string> {
+// 调用LLM API（带超时控制）
+async function callLLM(prompt: string, systemPrompt: string = '', timeoutMs: number = 25000): Promise<string> {
+  const startTime = Date.now();
+  console.log(`[LLM] 开始调用 LLM API, timeout=${timeoutMs}ms`);
+  
   const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) {
     throw new Error('API key not configured');
   }
 
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
-  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1';
-  const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '1024');
+  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-v3';
+  const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '256');
 
   const messages: any[] = [];
   if (systemPrompt) {
@@ -99,32 +102,105 @@ async function callLLM(prompt: string, systemPrompt: string = ''): Promise<strin
   }
   messages.push({ role: 'user', content: prompt });
 
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.8,
-      max_tokens: maxTokens,
-      top_p: 0.95
-    })
-  });
+  // 创建 AbortController 用于超时控制
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    console.error(`[LLM] 请求超时 (${timeoutMs}ms)`);
+    controller.abort();
+  }, timeoutMs);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+  try {
+    console.log(`[LLM] 发送请求到 ${baseUrl}, model=${model}, maxTokens=${maxTokens}`);
+    
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.8,
+        max_tokens: maxTokens,
+        top_p: 0.95
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startTime;
+    console.log(`[LLM] 收到响应, status=${response.status}, 耗时=${elapsed}ms`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[LLM] API 错误: status=${response.status}, error=${errorText.substring(0, 200)}`);
+      throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+      console.error(`[LLM] 响应格式错误: ${JSON.stringify(data).substring(0, 200)}`);
+      throw new Error('LLM API returned no choices');
+    }
+
+    const rawContent = data.choices[0].message.content.trim();
+    
+    // 清理思考内容
+    const cleanedContent = cleanThinkingContent(rawContent);
+    
+    if (cleanedContent !== rawContent) {
+      console.log(`[LLM] 已清理思考内容, 原始长度=${rawContent.length}, 清理后长度=${cleanedContent.length}`);
+    }
+    
+    console.log(`[LLM] 成功获取响应, 内容长度=${cleanedContent.length}, 总耗时=${Date.now() - startTime}ms`);
+    return cleanedContent;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startTime;
+    
+    if (error.name === 'AbortError') {
+      console.error(`[LLM] 请求被中止 (超时), 耗时=${elapsed}ms`);
+      throw new Error(`LLM API request timeout after ${timeoutMs}ms`);
+    }
+    
+    console.error(`[LLM] 请求失败, 耗时=${elapsed}ms, error=${error.message}`);
+    throw error;
   }
+}
 
-  const data = await response.json();
-  if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-    throw new Error('LLM API returned no choices');
-  }
-
-  return data.choices[0].message.content.trim();
+// 清理LLM返回内容中的思考部分
+function cleanThinkingContent(content: string): string {
+  let cleaned = content;
+  
+  // 移除各种思考标记及其内容（使用非贪婪匹配）
+  // 匹配 <think>...</think> 及其变体
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '');
+  cleaned = cleaned.replace(/<\/?redacted_reasoning[^>]*>/gi, '');
+  
+  // 匹配 <thinking>...</thinking>
+  cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+  cleaned = cleaned.replace(/<\/?thinking[^>]*>/gi, '');
+  
+  // 匹配 <reasoning>...</reasoning>
+  cleaned = cleaned.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '');
+  cleaned = cleaned.replace(/<\/?reasoning[^>]*>/gi, '');
+  
+  // 匹配 <thought>...</thought>
+  cleaned = cleaned.replace(/<thought>[\s\S]*?<\/thought>/gi, '');
+  cleaned = cleaned.replace(/<\/?thought[^>]*>/gi, '');
+  
+  // 匹配 <think>...</think>
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  cleaned = cleaned.replace(/<\/?think[^>]*>/gi, '');
+  
+  // 清理多余的空白行（连续3个或更多换行符）
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  // 清理开头和结尾的空白
+  cleaned = cleaned.trim();
+  
+  return cleaned;
 }
 
 // 主题关键词映射 - 用于简单的关键词匹配（备用方案）
@@ -165,7 +241,7 @@ function matchThemesByKeywords(text: string, themes: string[]): string[] {
   return matched;
 }
 
-// 检测大类内容缺失
+// 检测大类内容缺失（快速版本，使用关键词匹配）
 async function detectMissingThemes(
   userId: string,
   chapter: string,
@@ -190,25 +266,32 @@ async function detectMissingThemes(
 
   // 从对话历史中提取主题
   if (history && history.length > 0) {
-    // 方法1：尝试使用LLM分析（更准确）
-    let llmSuccess = false;
-    let llmError: any = null;
+    // 直接使用关键词匹配（更快，不阻塞）
+    // LLM 分析改为异步后台任务
+    const allText = history
+      .slice(-5) // 减少到最近5轮对话，提高速度
+      .map((h: any) => `${h.question || h.ai_question} ${h.answer || h.user_answer}`)
+      .join(' ');
     
-    // 检查 API key 是否配置
+    const matchedThemes = matchThemesByKeywords(allText, config.requiredThemes);
+    matchedThemes.forEach(theme => discussedThemes.add(theme));
+    console.log(`[THEME] ✓ 关键词匹配识别到主题: ${Array.from(discussedThemes).join(', ')}`);
+    
+    // 异步调用 LLM 分析（不阻塞主流程）
     const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
-    if (!apiKey) {
-      console.warn('LLM API key not configured, skipping LLM analysis');
-    } else {
-      try {
-        const historyText = history
-          .slice(-10) // 最近10轮对话
-          .map((h: any) => `问：${h.question || h.ai_question}\n答：${h.answer || h.user_answer}`)
-          .join('\n\n');
+    if (apiKey) {
+      // 后台异步更新，不等待结果
+      (async () => {
+        try {
+          const historyText = history
+            .slice(-5) // 最近5轮对话
+            .map((h: any) => `问：${h.question || h.ai_question}\n答：${h.answer || h.user_answer}`)
+            .join('\n\n');
 
-        console.log(`开始LLM主题分析，对话历史长度: ${historyText.length} 字符`);
+          console.log(`[THEME] [ASYNC] 开始后台LLM主题分析，对话历史长度: ${historyText.length} 字符`);
 
-        const analysisPrompt = `请分析以下对话内容，提取已讨论的主题关键词（从以下主题列表中选择）：
-      
+          const analysisPrompt = `请分析以下对话内容，提取已讨论的主题关键词（从以下主题列表中选择）：
+        
 对话内容：
 ${historyText}
 
@@ -222,59 +305,49 @@ ${config.requiredThemes.join('、')}
 
 只输出JSON，不要其他内容。`;
 
-        const analysisResult = await callLLM(
-          analysisPrompt,
-          '你是一个专业的主题分析助手，擅长从对话中提取关键主题。'
-        );
+          // 使用较短的超时时间（10秒），后台任务
+          const analysisResult = await callLLM(
+            analysisPrompt,
+            '你是一个专业的主题分析助手，擅长从对话中提取关键主题。',
+            10000  // 10秒超时
+          );
 
-        console.log('LLM分析结果:', analysisResult.substring(0, 200));
+          console.log(`[THEME] [ASYNC] LLM分析结果: ${analysisResult.substring(0, 200)}`);
 
-        // 解析JSON
-        const jsonMatch = analysisResult.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[0]);
-            if (parsed.themes && Array.isArray(parsed.themes) && parsed.themes.length > 0) {
-              parsed.themes.forEach((theme: string) => {
-                // 验证主题是否在配置的主题列表中
-                if (config.requiredThemes.includes(theme)) {
-                  discussedThemes.add(theme);
-                } else {
-                  console.warn(`LLM返回的主题不在配置列表中: ${theme}`);
+          // 解析JSON并更新摘要（异步）
+          const jsonMatch = analysisResult.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (parsed.themes && Array.isArray(parsed.themes) && parsed.themes.length > 0) {
+                const validThemes = parsed.themes.filter((theme: string) => 
+                  config.requiredThemes.includes(theme)
+                );
+                
+                if (validThemes.length > 0) {
+                  // 异步更新 conversation_summary 表
+                  await supabase
+                    .from('conversation_summary')
+                    .upsert({
+                      user_id: userId,
+                      chapter: chapter,
+                      key_themes: validThemes,
+                      updated_at: new Date().toISOString()
+                    }, {
+                      onConflict: 'user_id,chapter'
+                    });
+                  
+                  console.log(`[THEME] [ASYNC] ✓ 后台LLM主题分析成功，已更新摘要: ${validThemes.join(', ')}`);
                 }
-              });
-              llmSuccess = true;
-              console.log('✓ LLM主题分析成功，识别到主题:', Array.from(discussedThemes));
-            } else {
-              console.warn('LLM返回的JSON中没有themes数组或数组为空');
+              }
+            } catch (parseError) {
+              console.error('[THEME] [ASYNC] JSON解析失败:', parseError);
             }
-          } catch (parseError) {
-            console.error('JSON解析失败:', parseError);
-            console.error('尝试解析的内容:', jsonMatch[0]);
           }
-        } else {
-          console.warn('LLM返回结果中没有找到JSON格式');
+        } catch (error) {
+          console.error('[THEME] [ASYNC] 后台LLM分析出错:', error instanceof Error ? error.message : String(error));
         }
-      } catch (error) {
-        llmError = error;
-        console.error('LLM分析出错:', error);
-        console.error('错误详情:', error instanceof Error ? error.message : String(error));
-      }
-    }
-    
-    // 方法2：如果LLM失败，使用关键词匹配（备用方案）
-    if (!llmSuccess) {
-      const reason = !apiKey ? 'API key未配置' : llmError ? `LLM调用失败: ${llmError instanceof Error ? llmError.message : String(llmError)}` : '未识别到有效主题';
-      console.log(`使用关键词匹配备用方案 (原因: ${reason})`);
-      
-      const allText = history
-        .slice(-10)
-        .map((h: any) => `${h.question || h.ai_question} ${h.answer || h.user_answer}`)
-        .join(' ');
-      
-      const matchedThemes = matchThemesByKeywords(allText, config.requiredThemes);
-      matchedThemes.forEach(theme => discussedThemes.add(theme));
-      console.log('✓ 关键词匹配识别到主题:', Array.from(discussedThemes));
+      })();
     }
   }
 
@@ -312,9 +385,9 @@ async function generateInterviewQuestion(
   try {
     let prompt = `我正在和一位老人进行人生访谈，当前章节是"${chapter}"（${config.description}）。\n\n`;
     
-    // 添加对话历史
+    // 添加对话历史（减少到最近2轮，提高速度）
     prompt += '【对话历史】\n';
-    const recentHistory = history.slice(-3); // 最近3轮对话
+    const recentHistory = history.slice(-2); // 最近2轮对话
     for (const record of recentHistory) {
       prompt += `问：${record.question || record.ai_question}\n`;
       prompt += `答：${record.answer || record.user_answer}\n\n`;
@@ -354,9 +427,15 @@ async function generateInterviewQuestion(
     prompt += `6. 只输出问题本身，不要其他内容\n\n`;
     prompt += `请直接输出下一个问题：`;
 
-    const systemPrompt = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的问题要温暖、自然、有针对性，像朋友间的对话一样。';
+    const systemPrompt = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的问题要温暖、自然、有针对性，像朋友间的对话一样。只输出问题本身，不要包含任何思考过程或推理内容。';
     
-    let question = await callLLM(prompt, systemPrompt);
+    // 使用较短的超时时间（15秒），v3 模型更快
+    let question = await callLLM(prompt, systemPrompt, 15000);
+    
+    // 清理思考内容（callLLM 已经清理，但这里再次确保）
+    question = cleanThinkingContent(question);
+    
+    // 清理常见的前缀和引号
     question = question.replace(/^问：|^问题：|^Q:|^下一个问题：/i, '').trim();
     question = question.replace(/^["']|["']$/g, '').trim();
 
@@ -373,6 +452,9 @@ async function generateInterviewQuestion(
 }
 
 Deno.serve(async (req) => {
+  const requestStartTime = Date.now();
+  console.log(`[REQUEST] ${req.method} ${new URL(req.url).pathname} - 开始处理请求`);
+  
   // 处理CORS预检请求
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -383,7 +465,7 @@ Deno.serve(async (req) => {
     // 我们只需要确保有 header，具体的验证由平台处理
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      console.warn('Missing Authorization header');
+      console.warn('[AUTH] Missing Authorization header');
       // 不直接拒绝，让 Supabase 平台处理（某些配置可能允许匿名访问）
     }
 
@@ -395,6 +477,8 @@ Deno.serve(async (req) => {
     
     const requestData = await req.json();
     const { userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
+    
+    console.log(`[REQUEST] 参数: userId=${userId}, chapter=${chapter}, sessionId=${sessionId || 'new'}, roundNumber=${roundNumber || 'N/A'}`);
 
     if (!userId || !chapter) {
       return new Response(
@@ -489,7 +573,9 @@ Deno.serve(async (req) => {
       // TODO: 可以调用AI提取关键信息
     }
 
-    // 检测缺失的主题
+    // 快速检测缺失的主题（使用关键词匹配，不等待LLM）
+    console.log(`[THEME] 开始快速主题检测, 历史记录数=${history?.length || 0}`);
+    const themeStartTime = Date.now();
     const { missingThemes, coverage } = await detectMissingThemes(
       userId,
       chapter,
@@ -497,8 +583,11 @@ Deno.serve(async (req) => {
       summary,
       supabase
     );
+    console.log(`[THEME] 快速主题检测完成, 耗时=${Date.now() - themeStartTime}ms, 缺失主题数=${missingThemes.length}, 覆盖率=${coverage}%`);
 
     // 生成下一个问题
+    console.log(`[QUESTION] 开始生成问题`);
+    const questionStartTime = Date.now();
     const question = await generateInterviewQuestion(
       userId,
       chapter,
@@ -507,6 +596,7 @@ Deno.serve(async (req) => {
       missingThemes,
       supabase
     );
+    console.log(`[QUESTION] 问题生成完成, 耗时=${Date.now() - questionStartTime}ms, 问题长度=${question.length}`);
 
     // 保存新问题到数据库（适配不同的表结构）
     const nextRoundNumber = (history?.length || 0) + 1;
@@ -571,6 +661,9 @@ Deno.serve(async (req) => {
     }
 
     // 返回响应
+    const totalTime = Date.now() - requestStartTime;
+    console.log(`[REQUEST] 请求处理完成, 总耗时=${totalTime}ms`);
+    
     return new Response(
       JSON.stringify({
         success: true,
@@ -590,7 +683,10 @@ Deno.serve(async (req) => {
     );
 
   } catch (error: any) {
-    console.error('Error:', error);
+    const totalTime = Date.now() - requestStartTime;
+    console.error(`[ERROR] 请求处理失败, 总耗时=${totalTime}ms, error=${error.message}`);
+    console.error(`[ERROR] 错误堆栈:`, error.stack);
+    
     return new Response(
       JSON.stringify({ 
         success: false,
