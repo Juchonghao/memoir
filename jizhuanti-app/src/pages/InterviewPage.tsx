@@ -161,9 +161,33 @@ export default function InterviewPage() {
   const initializeSession = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      if (!user || !user.id) {
+        console.log('用户未登录，跳转到登录页')
         navigate('/auth')
         return
+      }
+
+      console.log('当前用户ID:', user.id)
+      
+      // 确保用户记录存在于users表中
+      try {
+        const { error: upsertError } = await supabase
+          .from('users')
+          .upsert({
+            id: user.id,
+            email: user.email || 'anonymous@example.com',
+            full_name: user.user_metadata?.full_name || null,
+            avatar_url: user.user_metadata?.avatar_url || null,
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'id'
+          })
+        
+        if (upsertError) {
+          console.warn('创建用户记录失败（可能已存在）:', upsertError)
+        }
+      } catch (userErr) {
+        console.warn('用户记录创建异常:', userErr)
       }
 
       const chapterName = CHAPTER_NAMES[chapter || 'childhood']

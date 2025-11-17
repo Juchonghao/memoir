@@ -50,12 +50,13 @@ function cleanThinkingContent(content: string): string {
   return cleaned;
 }
 
-// 调用LLM API生成回忆录
-async function generateMemoir(
+// 调用LLM API生成回忆录（流式返回）
+async function generateMemoirStream(
   conversations: any[],
   writingStyle: string,
   title: string,
-  chapter?: string
+  chapter?: string,
+  onProgress?: (chunk: string, percentage: number) => void
 ): Promise<string> {
   // 获取 API key，去除前后空格
   let apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
@@ -73,7 +74,7 @@ async function generateMemoir(
   console.log(`Using LLM API: baseUrl=${Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai'}, model=${Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1'}, apiKey=${apiKeyPrefix}`);
 
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
-  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-v3';
+  const model = Deno.env.get('OPENAI_MODEL') || 'pa/gmn-2.5-fls';
   const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '4000');
 
   // 构建访谈数据（适配不同的表结构）
@@ -112,16 +113,17 @@ ${JSON.stringify(interviewData, null, 2)}
       messages: [
         {
           role: 'system',
-          content: '你是一位专业的传记作家，擅长将人生故事转化为优美的文学作品。'
+          content: '你是一位专业的传记作家，擅长将人生故事转化为优美的文学作品。请基于真实访谈内容创作，绝不编造或虚构未提及的事实。'
         },
         {
           role: 'user',
           content: systemPrompt
         }
       ],
-      temperature: 0.9,
+      temperature: 0.7,
       max_tokens: maxTokens,
-      top_p: 0.95
+      top_p: 0.9,
+      stream: true
     })
   });
 
@@ -129,7 +131,6 @@ ${JSON.stringify(interviewData, null, 2)}
     const errorText = await response.text();
     console.error(`LLM API call failed: status=${response.status}, error=${errorText}`);
     
-    // 提供更友好的错误信息
     if (response.status === 401) {
       throw new Error(`LLM API authentication failed (401). Please check if your API key is valid and correctly configured in Supabase project settings. Error details: ${errorText}`);
     } else if (response.status === 403) {
@@ -141,12 +142,57 @@ ${JSON.stringify(interviewData, null, 2)}
     }
   }
 
-  const data = await response.json();
-  if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-    throw new Error('LLM API returned no choices');
+  // 处理流式响应
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  let fullContent = '';
+  let buffer = '';
+  
+  if (!reader) {
+    throw new Error('Response body is not readable');
   }
 
-  const rawContent = data.choices[0].message.content.trim();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              fullContent += content;
+              // 计算进度（估算）
+              const estimatedTotal = maxTokens * 2; // 估算总字符数
+              const percentage = Math.min(95, Math.floor((fullContent.length / estimatedTotal) * 100));
+              if (onProgress) {
+                onProgress(content, percentage);
+              }
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!fullContent) {
+    throw new Error('LLM API returned empty content');
+  }
+
+  const rawContent = fullContent.trim();
   
   // 清理思考内容
   const cleanedContent = cleanThinkingContent(rawContent);
@@ -474,8 +520,69 @@ Deno.serve(async (req) => {
 
     console.log(`Using ${validConversations.length} valid conversations (with both Q&A) out of ${conversations.length} total`);
 
-    // 生成回忆录内容
-    const memoirContent = await generateMemoir(
+    // 异步生成回忆录内容，返回流式进度
+    // 检查是否请求流式响应
+    if (requestData.stream === true) {
+      // 返回Server-Sent Events流
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          
+          try {
+            let generatedContent = '';
+            
+            await generateMemoirStream(
+              validConversations,
+              writingStyle || 'default',
+              title || '我的人生故事',
+              chapter,
+              (chunk: string, percentage: number) => {
+                generatedContent += chunk;
+                // 发送进度更新
+                const message = `data: ${JSON.stringify({ type: 'progress', percentage, chunk })}\n\n`;
+                controller.enqueue(encoder.encode(message));
+              }
+            );
+            
+            // 发送完成消息
+            const completeMessage = `data: ${JSON.stringify({ type: 'complete', percentage: 100, content: generatedContent })}\n\n`;
+            controller.enqueue(encoder.encode(completeMessage));
+            controller.close();
+            
+            // 保存到数据库
+            if (requestData.saveToDatabase !== false) {
+              await supabase
+                .from('biographies')
+                .insert({
+                  user_id: userId,
+                  title: title || '我的人生故事',
+                  content: generatedContent,
+                  writing_style: writingStyle || 'default',
+                  status: 'completed',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+            }
+          } catch (error: any) {
+            const errorMessage = `data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`;
+            controller.enqueue(encoder.encode(errorMessage));
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        }
+      });
+    }
+
+    // 非流式模式：传统方式生成
+    const memoirContent = await generateMemoirStream(
       validConversations,
       writingStyle || 'default',
       title || '我的人生故事',

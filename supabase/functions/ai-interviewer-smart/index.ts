@@ -71,8 +71,8 @@ const chapterConfig = {
 
 interface ConversationHistory {
   round_number: number;
-  ai_question: string;
-  user_answer: string;
+  question: string;
+  answer: string;
   created_at: string;
 }
 
@@ -87,11 +87,18 @@ interface ConversationSummary {
 async function callGemini(prompt: string, apiKey: string): Promise<string> {
   console.log('Calling DeepSeek API...');
   
-  const systemInstruction = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的问题要温暖、自然、有针对性，像朋友间的对话一样。';
+  const systemInstruction = `你是一位经验丰富的AI记者，采访风格借鉴白岩松的深度访谈技巧：
+1. 温和但有力度的提问
+2. 善于从回答中捕捉细节，深入追问
+3. 不放过含糊其辞的回答，换个角度继续问
+4. 让被访者充分表达，挖掘真实情感
+5. 提问简洁明确，避免空泛
+6. 基于已有信息继续深入，不重复已问过的内容
+7. 直接输出问题，不要加任何括号备注或情感标记`;
   
   // 使用OpenAI兼容的API格式
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
-  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1';
+  const model = Deno.env.get('OPENAI_MODEL') || 'pa/gmn-2.5-fls';
   const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '512');
   
   const response = await fetch(
@@ -114,8 +121,8 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
             content: prompt
           }
         ],
-        temperature: 0.8,
-        max_tokens: maxTokens,
+        temperature: 0.7,  // 降低温度提高速度和稳定性
+        max_tokens: 200,  // 增加到200确保问题完整
         top_p: 0.95
       })
     }
@@ -154,7 +161,7 @@ function isQuestionDuplicate(
 
   // 完全匹配检测
   for (const record of history) {
-    if (record.ai_question === newQuestion) {
+    if (record.question === newQuestion) {
       console.log('Found exact duplicate question');
       return true;
     }
@@ -163,7 +170,7 @@ function isQuestionDuplicate(
   // 相似度检测（简单的关键词匹配）
   const newKeywords = extractKeywords(newQuestion);
   for (const record of history) {
-    const oldKeywords = extractKeywords(record.ai_question);
+    const oldKeywords = extractKeywords(record.question);
     const similarity = calculateSimilarity(newKeywords, oldKeywords);
     if (similarity > 0.6) {
       console.log(`Found similar question (similarity: ${similarity})`);
@@ -253,7 +260,7 @@ async function generateSmartQuestion(
   // 如果没有API密钥，使用备用问题库
   if (!geminiApiKey) {
     console.log('No API key, using fallback questions');
-    const usedQuestions = history.map(h => h.ai_question);
+    const usedQuestions = history.map(h => h.question);
     const availableQuestions = config.fallbackQuestions.filter(
       q => !usedQuestions.includes(q)
     );
@@ -274,8 +281,17 @@ async function generateSmartQuestion(
     prompt += '【对话历史】\n';
     const recentHistory = history.slice(-3); // 最近3轮对话
     for (const record of recentHistory) {
-      prompt += `问：${record.ai_question}\n`;
-      prompt += `答：${record.user_answer}\n\n`;
+      prompt += `问：${record.question}\n`;
+      prompt += `答：${record.answer}\n\n`;
+    }
+    
+    // 特别强调最后一个回答
+    if (recentHistory.length > 0) {
+      const lastQA = recentHistory[recentHistory.length - 1];
+      prompt += `【最重要：用户刚才的回答】\n`;
+      prompt += `问：${lastQA.question}\n`;
+      prompt += `答：${lastQA.answer}\n\n`;
+      prompt += `你的下一个问题必须基于这个回答："${lastQA.answer}"\n\n`;
     }
     
     // 添加摘要信息
@@ -293,14 +309,18 @@ async function generateSmartQuestion(
       prompt += '\n';
     }
     
-    // 添加指导要求
+   // 添加指导要求
     prompt += `【要求】\n`;
-    prompt += `请基于上述对话，生成下一个深入的追问。要求：\n`;
-    prompt += `1. 自然延续当前话题，不要跳跃\n`;
-    prompt += `2. 如果用户的回答中提到了有趣的细节，可以深入追问\n`;
-    prompt += `3. 语气温暖、亲切，像朋友聊天\n`;
-    prompt += `4. 问题要具体，避免空泛\n`;
-    prompt += `5. 只输出问题本身，不要其他内容\n\n`;
+    prompt += `请仔细阅读用户的最后一个回答，基于该回答生成下一个深入的追问。要求：\n`;
+    prompt += `1. **必须基于用户刚才的回答**，不要跳到完全不相关的话题\n`;
+    prompt += `2. 如果上一个回答含糊不清或过于简短，不要跳到下一个问题，而是换个方式继续追问同一个话题\n`;
+    prompt += `3. 用白岩松式的采访技巧：温和但有力度，从细节入手，层层深入\n`;
+    prompt += `4. 判断当前主题是否已经挖掘充分，如果不够充分，继续深挖\n`;
+    prompt += `5. 绝不重复问过的问题，每个问题都要有新的角度\n`;
+    prompt += `6. 问题要简洁、具体，一次只问一个核心问题\n`;
+    prompt += `7. 只输出问题本身，不要分析、不要解释、不要加任何括号备注、不要说明语气和情感\n`;
+    prompt += `8. 直接输出问题，不要有"（语气温和）"、"（略带沉思）"等任何备注\n`;
+    prompt += `9. 确保问题完整，不要在句子中间截断\n\n`;
     prompt += `请直接输出下一个问题：`;
 
     console.log('Generating question with Gemini...');
@@ -311,6 +331,9 @@ async function generateSmartQuestion(
     // 清理问题格式
     question = question.replace(/^问：|^问题：|^Q:|^下一个问题：/i, '').trim();
     question = question.replace(/^["']|["']$/g, '').trim();
+    // 移除所有括号中的内容（包括语气、情感等备注）
+    question = question.replace(/[（(][^)）]*[)）]/g, '').trim();
+    question = question.replace(/【[^】]*】/g, '').trim();
     
     // 检查是否重复
     let attempts = 0;
@@ -320,13 +343,15 @@ async function generateSmartQuestion(
       question = await callGemini(regeneratePrompt, geminiApiKey);
       question = question.replace(/^问：|^问题：|^Q:|^下一个问题：/i, '').trim();
       question = question.replace(/^["']|["']$/g, '').trim();
+      question = question.replace(/[（(][^)）]*[)）]/g, '').trim();
+      question = question.replace(/【[^】]*】/g, '').trim();
       attempts++;
     }
     
     // 如果仍然重复，使用备用问题
     if (isQuestionDuplicate(question, history)) {
       console.log('Still duplicate after retries, using fallback');
-      const usedQuestions = history.map(h => h.ai_question);
+      const usedQuestions = history.map(h => h.question);
       const availableQuestions = config.fallbackQuestions.filter(
         q => !usedQuestions.includes(q)
       );
@@ -344,7 +369,7 @@ async function generateSmartQuestion(
   } catch (error) {
     console.error('Error generating question with Gemini:', error);
     // 降级到备用问题
-    const usedQuestions = history.map(h => h.ai_question);
+    const usedQuestions = history.map(h => h.question);
     const availableQuestions = config.fallbackQuestions.filter(
       q => !usedQuestions.includes(q)
     );
@@ -558,6 +583,39 @@ Deno.serve(async (req) => {
         );
       }
 
+      // 检查是否有之前的session，如果有，生成总结开场
+      const { data: previousSessions } = await supabase
+        .from('conversation_history')
+        .select('session_id')
+        .eq('user_id', userId)
+        .eq('chapter', chapter)
+        .neq('session_id', sessionId)
+        .limit(1);
+
+      let openingQuestion = null;
+      
+      if (previousSessions && previousSessions.length > 0) {
+        // 有之前的会话，生成总结开场
+        const { data: previousHistory } = await supabase
+          .from('conversation_history')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('chapter', chapter)
+          .neq('session_id', sessionId)
+          .order('round_number', { ascending: true });
+
+        if (previousHistory && previousHistory.length > 0 && geminiApiKey) {
+          // 使用AI生成总结开场
+          const previousQA = previousHistory.slice(-3).map(h => `问：${h.question}\n答：${h.answer}`).join('\n\n');
+          const summaryPrompt = `上次我们聊到了：\n${previousQA}\n\n请生成一个简短的总结开场，提及上次的话题，然后引入新的问题。开场要温暖、自然。只输出开场话术，不要问题。`;
+          try {
+            openingQuestion = await callGemini(summaryPrompt, geminiApiKey);
+          } catch (e) {
+            openingQuestion = `欢迎回来！上次我们聊到了${chapter}的一些美好回忆，今天我们继续深入聊聊。`;
+          }
+        }
+      }
+
       // 获取对话历史
       const { data: history, error: historyError } = await supabase
         .from('conversation_history')
@@ -602,8 +660,10 @@ Deno.serve(async (req) => {
           chapter: chapter,
           session_id: sessionId,
           round_number: nextRoundNumber,
-          ai_question: question,
-          user_answer: '',
+          question: question,
+          answer: '',
+          ai_question: question,  // Also populate old column for compatibility
+          user_answer: '',  // Also populate old column for compatibility
           created_at: new Date().toISOString()
         });
 
@@ -617,9 +677,10 @@ Deno.serve(async (req) => {
 
       return new Response(
         JSON.stringify({ 
-          question,
+          question: openingQuestion ? `${openingQuestion}\n\n${question}` : question,
           roundNumber: nextRoundNumber,
-          usingAI: !!geminiApiKey
+          usingAI: !!geminiApiKey,
+          isReturningUser: !!openingQuestion
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -639,7 +700,7 @@ Deno.serve(async (req) => {
       let currentRecord = null
       const { data: recordByRound } = await supabase
         .from('conversation_history')
-        .select('ai_question, round_number')
+        .select('question, round_number')
         .eq('user_id', userId)
         .eq('chapter', chapter)
         .eq('session_id', sessionId)
@@ -652,11 +713,11 @@ Deno.serve(async (req) => {
         // 如果找不到对应 roundNumber，查找最新的未回答的问题
         const { data: latestUnanswered } = await supabase
           .from('conversation_history')
-          .select('ai_question, round_number')
+          .select('question, round_number')
           .eq('user_id', userId)
           .eq('chapter', chapter)
           .eq('session_id', sessionId)
-          .eq('user_answer', '')
+          .eq('answer', '')
           .order('round_number', { ascending: false })
           .limit(1)
           .single();
@@ -682,7 +743,8 @@ Deno.serve(async (req) => {
       const { error: updateError } = await supabase
         .from('conversation_history')
         .update({ 
-          user_answer: userAnswer
+          answer: userAnswer,
+          user_answer: userAnswer  // Also update old column for compatibility
         })
         .eq('user_id', userId)
         .eq('chapter', chapter)
@@ -736,6 +798,8 @@ Deno.serve(async (req) => {
           chapter: chapter,
           session_id: sessionId,
           round_number: nextRoundNumber,
+          question: nextQuestion,
+          answer: '',
           ai_question: nextQuestion,
           user_answer: '',
           created_at: new Date().toISOString()
