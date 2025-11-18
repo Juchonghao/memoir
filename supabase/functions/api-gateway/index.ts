@@ -193,7 +193,7 @@ async function generateSmartQuestion(
     let prompt = `我正在和一位老人进行人生访谈，当前章节是"${chapter}"（${config.description}）。\n\n`;
     
     prompt += '【对话历史】\n';
-    const recentHistory = history.slice(-3);
+    const recentHistory = history.slice(-5); // 使用最近5轮，保持更好的上下文
     for (const record of recentHistory) {
       prompt += `问：${record.ai_question || record.question}\n`;
       prompt += `答：${record.user_answer || record.answer}\n\n`;
@@ -214,20 +214,31 @@ async function generateSmartQuestion(
     }
     
     prompt += `【要求】\n请基于上述对话，生成下一个深入的追问。要求：\n`;
-    prompt += `1. 自然延续当前话题，不要跳跃\n`;
-    prompt += `2. 如果用户的回答中提到了有趣的细节，可以深入追问\n`;
+    prompt += `1. 自然延续当前话题，不要跳跃，要与用户的回答紧密相关\n`;
+    prompt += `2. 如果用户的回答中提到了有趣的细节，可以深入追问这些细节\n`;
     prompt += `3. 语气温暖、亲切，像朋友聊天\n`;
-    prompt += `4. 问题要具体，避免空泛\n`;
-    prompt += `5. 只输出问题本身，不要其他内容\n\n`;
-    prompt += `请直接输出下一个问题：`;
+    prompt += `4. 问题要具体、完整，避免空泛或过于简短（至少15-30字）\n`;
+    prompt += `5. 问题要连贯，能够承接用户的回答，不要突兀转换话题\n`;
+    prompt += `6. 只输出完整的问题本身，不要其他内容，不要只输出几个字\n\n`;
+    prompt += `请直接输出一个完整、连贯的问题（至少15字）：`;
 
-    const systemPrompt = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的问题要温暖、自然、有针对性，像朋友间的对话一样。';
+    const systemPrompt = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的问题要温暖、自然、有针对性，像朋友间的对话一样。必须生成完整的问题（至少15-30字），不要只输出几个字。只输出问题本身，不要包含任何思考过程、推理内容或前缀。';
     
     let question = await callDeepSeek(prompt, systemPrompt);
     question = question.replace(/^问：|^问题：|^Q:|^下一个问题：/i, '').trim();
     question = question.replace(/^["']|["']$/g, '').trim();
 
-    return question || config.fallbackQuestions[0];
+    // 检查问题长度，如果太短，使用备用问题
+    if (!question || question.length < 10) {
+      console.warn(`[QUESTION] 生成的问题太短（${question?.length || 0}字），使用备用问题`);
+      const usedQuestions = history.map(h => h.ai_question || h.question);
+      const availableQuestions = config.fallbackQuestions.filter(
+        q => !usedQuestions.includes(q)
+      );
+      return availableQuestions.length > 0 ? availableQuestions[0] : config.fallbackQuestions[0];
+    }
+
+    return question;
   } catch (error) {
     console.error('Error generating question:', error);
     const usedQuestions = history.map(h => h.ai_question || h.question);

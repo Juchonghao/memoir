@@ -74,7 +74,7 @@ async function generateMemoirStream(
   console.log(`Using LLM API: baseUrl=${Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai'}, model=${Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-r1'}, apiKey=${apiKeyPrefix}`);
 
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
-  const model = Deno.env.get('OPENAI_MODEL') || 'pa/gmn-2.5-fls';
+  const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-v3';
   const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '4000');
 
   // 构建访谈数据（适配不同的表结构）

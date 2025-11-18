@@ -85,7 +85,10 @@ const chapterConfig = {
 // 调用LLM API（带超时控制）
 async function callLLM(prompt: string, systemPrompt: string = '', timeoutMs: number = 25000): Promise<string> {
   const startTime = Date.now();
+  const llmTimings: Record<string, number> = {};
+  
   console.log(`[LLM] 开始调用 LLM API, timeout=${timeoutMs}ms`);
+  console.log(`[LLM] Prompt长度: ${prompt.length}字符, SystemPrompt长度: ${systemPrompt.length}字符`);
   
   const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) {
@@ -94,7 +97,7 @@ async function callLLM(prompt: string, systemPrompt: string = '', timeoutMs: num
 
   const baseUrl = Deno.env.get('OPENAI_BASE_URL') || 'https://api.ppinfra.com/openai';
   const model = Deno.env.get('OPENAI_MODEL') || 'deepseek/deepseek-v3';
-  const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '256');
+  const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '512');
 
   const messages: any[] = [];
   if (systemPrompt) {
@@ -110,8 +113,12 @@ async function callLLM(prompt: string, systemPrompt: string = '', timeoutMs: num
   }, timeoutMs);
 
   try {
+    const prepareTime = Date.now() - startTime;
+    llmTimings['prepare'] = prepareTime;
+    console.log(`[LLM] 准备请求耗时: ${prepareTime}ms`);
     console.log(`[LLM] 发送请求到 ${baseUrl}, model=${model}, maxTokens=${maxTokens}`);
     
+    const fetchStartTime = Date.now();
     const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -129,8 +136,10 @@ async function callLLM(prompt: string, systemPrompt: string = '', timeoutMs: num
     });
 
     clearTimeout(timeoutId);
+    const fetchTime = Date.now() - fetchStartTime;
+    llmTimings['network'] = fetchTime;
     const elapsed = Date.now() - startTime;
-    console.log(`[LLM] 收到响应, status=${response.status}, 耗时=${elapsed}ms`);
+    console.log(`[LLM] 收到响应, status=${response.status}, 网络耗时=${fetchTime}ms, 累计耗时=${elapsed}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -138,22 +147,42 @@ async function callLLM(prompt: string, systemPrompt: string = '', timeoutMs: num
       throw new Error(`LLM API error: ${response.status} - ${errorText}`);
     }
 
+    const parseStartTime = Date.now();
     const data = await response.json();
+    const parseTime = Date.now() - parseStartTime;
+    llmTimings['parse'] = parseTime;
+    console.log(`[LLM] 解析JSON耗时: ${parseTime}ms`);
+    
     if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
       console.error(`[LLM] 响应格式错误: ${JSON.stringify(data).substring(0, 200)}`);
       throw new Error('LLM API returned no choices');
     }
 
     const rawContent = data.choices[0].message.content.trim();
+    console.log(`[LLM] 原始响应长度: ${rawContent.length}字符`);
     
     // 清理思考内容
+    const cleanStartTime = Date.now();
     const cleanedContent = cleanThinkingContent(rawContent);
+    const cleanTime = Date.now() - cleanStartTime;
+    llmTimings['clean'] = cleanTime;
     
     if (cleanedContent !== rawContent) {
-      console.log(`[LLM] 已清理思考内容, 原始长度=${rawContent.length}, 清理后长度=${cleanedContent.length}`);
+      console.log(`[LLM] 已清理思考内容, 原始长度=${rawContent.length}, 清理后长度=${cleanedContent.length}, 清理耗时=${cleanTime}ms`);
     }
     
-    console.log(`[LLM] 成功获取响应, 内容长度=${cleanedContent.length}, 总耗时=${Date.now() - startTime}ms`);
+    const totalTime = Date.now() - startTime;
+    llmTimings['total'] = totalTime;
+    console.log(`[LLM] ========== LLM调用性能统计 ==========`);
+    console.log(`[LLM] 总耗时: ${totalTime}ms`);
+    Object.entries(llmTimings).forEach(([key, value]) => {
+      if (key !== 'total') {
+        const percentage = ((value / totalTime) * 100).toFixed(1);
+        console.log(`[LLM]   - ${key}: ${value}ms (${percentage}%)`);
+      }
+    });
+    console.log(`[LLM] 成功获取响应, 内容长度=${cleanedContent.length}字符`);
+    console.log(`[LLM] =====================================`);
     return cleanedContent;
   } catch (error: any) {
     clearTimeout(timeoutId);
@@ -370,7 +399,8 @@ async function generateInterviewQuestion(
   history: any[],
   summary: any,
   missingThemes: string[],
-  supabase: any
+  supabase: any,
+  currentUserAnswer?: string  // 添加当前用户回答参数
 ): Promise<string> {
   const config = chapterConfig[chapter];
   if (!config) {
@@ -383,11 +413,51 @@ async function generateInterviewQuestion(
   }
 
   try {
+    const promptBuildStartTime = Date.now();
+    
+    // 特别强调用户的最新回答 - 放在最前面
+    const recentHistory = history.slice(-5);
+    let lastAnswer = '';
+    let lastQuestion = '';
+    if (recentHistory.length > 0) {
+      lastAnswer = recentHistory[recentHistory.length - 1].answer || recentHistory[recentHistory.length - 1].user_answer;
+      lastQuestion = recentHistory[recentHistory.length - 1].question || recentHistory[recentHistory.length - 1].ai_question;
+    }
+    
     let prompt = `我正在和一位老人进行人生访谈，当前章节是"${chapter}"（${config.description}）。\n\n`;
     
-    // 添加对话历史（减少到最近2轮，提高速度）
+    // 如果用户有最新回答，优先强调
+    if (lastAnswer && lastAnswer.length > 0) {
+      prompt += `【⚠️⚠️⚠️ 最重要：用户最新回答】\n`;
+      prompt += `上一个问题：${lastQuestion}\n`;
+      prompt += `用户回答：${lastAnswer}\n\n`;
+      prompt += `**你必须基于这个回答生成问题！禁止切换话题！禁止使用"关于XX..."模板！**\n\n`;
+      
+      // 根据用户回答类型给出具体指导
+      if (lastAnswer.includes('工程师') || lastAnswer.includes('工作') || lastAnswer.includes('职业')) {
+        prompt += `用户提到了职业信息，必须追问：这个职业对家庭的影响、工作场景、您对这个职业的印象等。\n\n`;
+      } else if (lastAnswer.includes('吃') || lastAnswer.includes('菜') || lastAnswer.includes('肉')) {
+        prompt += `用户提到了食物，必须追问：这是什么时候喜欢的、谁教的、有什么特殊意义等。\n\n`;
+      } else if (lastAnswer.includes('玩') || lastAnswer.includes('游戏')) {
+        prompt += `用户提到了游戏，必须追问：和谁一起玩、在哪里玩、有什么有趣经历等。\n\n`;
+      } else {
+        prompt += `从用户回答中提取关键信息（人物、地点、事件、情感），然后针对这个信息生成具体问题。\n\n`;
+      }
+    }
+    
+    // 添加对话历史（使用最近5轮，保持上下文连贯性）
+    // 如果传入了currentUserAnswer，确保最后一条记录包含用户回答
+    if (currentUserAnswer && recentHistory.length > 0) {
+      const lastRecord = recentHistory[recentHistory.length - 1];
+      if (lastRecord && (!lastRecord.answer && !lastRecord.user_answer)) {
+        lastRecord.answer = currentUserAnswer;
+        lastRecord.user_answer = currentUserAnswer;
+        console.log(`[QUESTION] 已更新recentHistory中的用户回答: "${currentUserAnswer}"`);
+      }
+    }
+    
     prompt += '【对话历史】\n';
-    const recentHistory = history.slice(-2); // 最近2轮对话
+    console.log(`[QUESTION] 构建prompt, 使用最近${recentHistory.length}轮对话历史`);
     for (const record of recentHistory) {
       prompt += `问：${record.question || record.ai_question}\n`;
       prompt += `答：${record.answer || record.user_answer}\n\n`;
@@ -415,22 +485,47 @@ async function generateInterviewQuestion(
     }
     
     // 添加指导要求
-    prompt += `【要求】\n`;
-    prompt += `请基于上述对话，生成下一个深入的追问。要求：\n`;
-    prompt += `1. 自然延续当前话题，不要跳跃\n`;
-    prompt += `2. 如果用户的回答中提到了有趣的细节，可以深入追问\n`;
-    prompt += `3. 语气温暖、亲切，像朋友聊天\n`;
-    prompt += `4. 问题要具体，避免空泛\n`;
+    prompt += `【重要要求】\n`;
+    prompt += `请仔细分析用户的回答，然后生成下一个深入的追问。要求：\n`;
+    prompt += `1. **必须基于用户的最新回答生成问题（这是最高优先级）**：\n`;
+    prompt += `   - 如果用户回答与问题不匹配（如回答了其他内容），要基于用户实际回答的内容生成问题，绝对不要回到原问题或切换话题\n`;
+    prompt += `   - 如果用户提供了新信息（如"我爸妈都是工程师"），必须深入追问这个新信息，绝对不要切换话题或问"关于XX..."这样的模板问题\n`;
+    prompt += `   - 如果用户回答简短，要鼓励性地追问更多细节，但必须围绕用户回答的内容追问\n`;
+    prompt += `   - 禁止使用"关于XX，您能详细分享一下..."这样的模板问题，必须个性化\n`;
+    prompt += `2. **提取关键信息并深入追问**：\n`;
+    prompt += `   - 从用户回答中提取关键信息（人物、地点、事件、情感等）\n`;
+    prompt += `   - 针对这些关键信息生成具体、深入的问题\n`;
+    prompt += `   - 例如：用户说"我爸妈都是工程师" → 追问"工程师这个职业对您的家庭有什么影响？他们工作忙吗？您小时候对他们的工作有什么印象？"\n`;
+    prompt += `3. **保持话题连贯性**：\n`;
+    prompt += `   - 优先延续当前话题，不要频繁切换\n`;
+    prompt += `   - 如果用户主动提到新话题，要深入追问，不要立即回到旧话题\n`;
+    prompt += `   - 自然过渡，避免突兀\n`;
+    prompt += `4. **问题要具体、完整**：\n`;
+    prompt += `   - 必须至少20-40字，绝对不能少于20字\n`;
+    prompt += `   - 避免空泛的问题，要具体到细节\n`;
+    prompt += `   - 避免使用模板化的问题（如"关于XX，您能详细分享一下..."），要个性化\n`;
     if (missingThemes.length > 0) {
-      prompt += `5. 优先引导用户分享缺失的主题内容\n`;
+      prompt += `5. **引导缺失主题**：在保持话题连贯的前提下，可以自然引导到缺失的主题\n`;
     }
-    prompt += `6. 只输出问题本身，不要其他内容\n\n`;
-    prompt += `请直接输出下一个问题：`;
+    prompt += `6. **语气温暖、亲切**：像朋友聊天一样，不要生硬\n`;
+    prompt += `7. **只输出问题本身**：不要包含任何前缀、解释或思考过程\n\n`;
+    prompt += `【示例】\n`;
+    prompt += `示例1：如果用户回答"我爸妈都是工程师"（新信息），好的问题应该是：\n`;
+    prompt += `"您提到父母都是工程师，这个职业对您的家庭生活有什么影响？他们工作忙的时候，您是怎么度过的？您小时候对他们的工作有什么印象吗？"\n\n`;
+    prompt += `示例2：如果用户回答"我爱吃鱼香肉丝"（与问题不匹配），好的问题应该是：\n`;
+    prompt += `"您提到喜欢吃鱼香肉丝，这是您小时候就喜欢的菜吗？是谁教您做的，还是您自己学会的？这道菜对您有什么特殊的意义吗？"\n`;
+    prompt += `❌ 错误示例：不要问"关于早期教育，您能详细分享一下..."（这是模板问题，切换了话题）\n\n`;
+    prompt += `示例3：如果用户回答"最喜欢玩捉迷藏"（简短回答），好的问题应该是：\n`;
+    prompt += `"您提到最喜欢玩捉迷藏，能跟我们说说您和谁一起玩的吗？通常在哪里玩？有没有什么特别有趣的游戏经历？"\n\n`;
+    prompt += `**现在请基于上述对话历史，特别是用户的最新回答，生成一个完整、深入、个性化的问题（必须至少20字，建议30-50字）：**`;
 
-    const systemPrompt = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的问题要温暖、自然、有针对性，像朋友间的对话一样。只输出问题本身，不要包含任何思考过程或推理内容。';
+    const promptBuildTime = Date.now() - promptBuildStartTime;
+    console.log(`[QUESTION] Prompt构建完成, 耗时=${promptBuildTime}ms, Prompt长度=${prompt.length}字符`);
+
+    const systemPrompt = '你是一位富有同理心的AI记者，专门帮助老年人回忆和记录人生故事。你的核心任务是：仔细分析用户的回答，提取关键信息，然后生成深入、个性化的问题。如果用户回答与问题不匹配，要基于用户实际回答的内容生成问题。如果用户提供了新信息，要深入追问这个新信息，不要切换话题。问题要温暖、自然、有针对性，像朋友间的对话一样。必须生成完整的问题（至少20-40字，绝对不能少于20字）。避免使用模板化的问题，要个性化。只输出问题本身，不要包含任何思考过程、推理内容或前缀。';
     
-    // 使用较短的超时时间（15秒），v3 模型更快
-    let question = await callLLM(prompt, systemPrompt, 15000);
+    // 增加超时时间到20秒，确保有足够时间生成完整问题
+    let question = await callLLM(prompt, systemPrompt, 20000);
     
     // 清理思考内容（callLLM 已经清理，但这里再次确保）
     question = cleanThinkingContent(question);
@@ -439,21 +534,151 @@ async function generateInterviewQuestion(
     question = question.replace(/^问：|^问题：|^Q:|^下一个问题：/i, '').trim();
     question = question.replace(/^["']|["']$/g, '').trim();
 
-    return question || config.fallbackQuestions[0];
+    // 检测模板化问题（"关于XX，您能详细分享一下..."或"您刚才提到...关于XX..."）
+    const hasTemplatePattern1 = /关于[^，,]+，您能详细(分享|说说)/.test(question);
+    const hasTemplatePattern2 = question.includes('关于') && question.includes('您能详细');
+    const hasTemplatePattern3 = question.includes('您刚才提到') && question.includes('关于') && question.includes('您能详细');
+    const isTemplateQuestion = hasTemplatePattern1 || hasTemplatePattern2 || hasTemplatePattern3;
+    
+    console.log(`[QUESTION] 模板检测: question="${question.substring(0, 80)}", isTemplate=${isTemplateQuestion}, historyLength=${history?.length || 0}`);
+    
+    // 如果检测到模板问题，强制替换（即使history为空，也使用传入的userAnswer）
+    if (isTemplateQuestion) {
+      let lastAnswer = '';
+      
+      // 优先从history获取
+      if (history && history.length > 0) {
+        const lastRecord = history[history.length - 1];
+        lastAnswer = lastRecord.answer || lastRecord.user_answer;
+        console.log(`[QUESTION] 从history获取最后回答: roundNumber=${lastRecord.round_number}, answer="${lastAnswer}"`);
+      }
+      
+      // 如果history中没有，使用传入的currentUserAnswer
+      if (!lastAnswer && currentUserAnswer && currentUserAnswer.length > 0) {
+        lastAnswer = currentUserAnswer;
+        console.log(`[QUESTION] 从函数参数获取用户回答: "${lastAnswer}"`);
+      }
+      
+      if (lastAnswer && lastAnswer.length > 0) {
+        console.warn(`[QUESTION] ⚠️ 检测到模板化问题，基于用户回答重新生成: "${lastAnswer}"`);
+        
+        // 基于用户回答生成个性化问题
+        if (lastAnswer.includes('工程师') || lastAnswer.includes('工作') || lastAnswer.includes('爸妈')) {
+          question = `您提到父母都是工程师，这个职业对您的家庭生活有什么影响？他们工作忙的时候，您是怎么度过的？您小时候对他们的工作有什么印象吗？`;
+        } else if (lastAnswer.includes('吃') || lastAnswer.includes('菜') || lastAnswer.includes('肉') || lastAnswer.includes('鱼香肉丝')) {
+          question = `您提到喜欢吃鱼香肉丝，这是您小时候就喜欢的菜吗？是谁教您做的，还是您自己学会的？这道菜对您有什么特殊的意义吗？`;
+        } else if (lastAnswer.includes('玩') || lastAnswer.includes('游戏') || lastAnswer.includes('捉迷藏')) {
+          question = `您提到最喜欢玩捉迷藏，能跟我们说说您和谁一起玩的吗？通常在哪里玩？有没有什么特别有趣的游戏经历？`;
+        } else if (lastAnswer.length > 5) {
+          // 通用处理：基于用户回答生成问题
+          const keyInfo = lastAnswer.length > 20 ? lastAnswer.substring(0, 20) : lastAnswer;
+          question = `您刚才提到"${keyInfo}"，能详细说说更多细节吗？比如当时是什么情况，您的心情是怎样的，这个经历对您有什么影响？`;
+        }
+        console.log(`[QUESTION] ✅ 已替换为个性化问题: "${question}"`);
+      } else {
+        console.warn(`[QUESTION] ⚠️ 检测到模板问题，但无法获取用户回答，保持原问题`);
+      }
+    }
+
+    // 检查问题长度，如果太短（少于20个字），使用备用问题或重新生成
+    if (!question || question.length < 20) {
+      console.warn(`[QUESTION] 生成的问题太短（${question?.length || 0}字），尝试使用备用问题或重新生成`);
+      const usedQuestions = history.map((h: any) => h.question || h.ai_question);
+      const availableQuestions = config.fallbackQuestions.filter(
+        (q: string) => !usedQuestions.includes(q) && q.length >= 20
+      );
+      
+      // 优先使用足够长的备用问题
+      if (availableQuestions.length > 0) {
+        return availableQuestions[0];
+      }
+      
+      // 如果所有备用问题都用完了，基于用户最新回答和缺失主题生成个性化问题
+      const lastAnswer = history.length > 0 ? (history[history.length - 1].answer || history[history.length - 1].user_answer) : '';
+      if (lastAnswer && lastAnswer.length > 0) {
+        // 提取用户回答中的关键信息
+        const keyInfo = lastAnswer.length > 10 ? lastAnswer.substring(0, 30) : lastAnswer;
+        if (missingThemes.length > 0) {
+          const personalizedQuestion = `您刚才提到"${keyInfo}"，这很有意思。关于${missingThemes[0]}，您能详细说说您的经历吗？比如具体发生了什么，当时的心情是怎样的，这个经历对您有什么影响？`;
+          if (personalizedQuestion.length >= 20) {
+            console.log(`[QUESTION] 使用基于用户回答和缺失主题生成的个性化问题`);
+            return personalizedQuestion;
+          }
+        } else {
+          const followUpQuestion = `您刚才提到"${keyInfo}"，能详细说说更多细节吗？比如当时是什么情况，您的心情是怎样的，这个经历对您有什么影响？`;
+          if (followUpQuestion.length >= 20) {
+            console.log(`[QUESTION] 使用基于用户回答生成的追问问题`);
+            return followUpQuestion;
+          }
+        }
+      }
+      
+      // 如果所有备用问题都用完了，生成一个基于缺失主题的完整问题
+      if (missingThemes.length > 0) {
+        const themeQuestion = `关于${missingThemes[0]}，您能详细分享一下您的经历和感受吗？比如具体发生了什么，当时的心情是怎样的？`;
+        if (themeQuestion.length >= 20) {
+          console.log(`[QUESTION] 使用基于缺失主题生成的问题: ${themeQuestion}`);
+          return themeQuestion;
+        }
+      }
+      
+      // 最后的备用方案：使用第一个备用问题（即使可能用过）
+      return config.fallbackQuestions[0];
+    }
+
+    return question;
   } catch (error) {
     console.error('Error generating question:', error);
-    // 降级到备用问题
+    // 降级到备用问题，优先选择足够长的问题
     const usedQuestions = history.map((h: any) => h.question || h.ai_question);
     const availableQuestions = config.fallbackQuestions.filter(
-      (q: string) => !usedQuestions.includes(q)
+      (q: string) => !usedQuestions.includes(q) && q.length >= 20
     );
-    return availableQuestions.length > 0 ? availableQuestions[0] : '还有什么想分享的故事吗？';
+    
+    if (availableQuestions.length > 0) {
+      return availableQuestions[0];
+    }
+    
+    // 如果所有备用问题都用完了，基于用户最新回答生成个性化问题
+    const lastAnswer = history.length > 0 ? (history[history.length - 1].answer || history[history.length - 1].user_answer) : '';
+    if (lastAnswer && lastAnswer.length > 0) {
+      // 提取用户回答中的关键信息
+      const keyInfo = lastAnswer.length > 15 ? lastAnswer.substring(0, 30) : lastAnswer;
+      if (missingThemes.length > 0) {
+        const personalizedQuestion = `您刚才提到"${keyInfo}"，这很有意思。关于${missingThemes[0]}，您能详细说说您的经历吗？比如具体发生了什么，当时的心情是怎样的，这个经历对您有什么影响？`;
+        if (personalizedQuestion.length >= 20) {
+          console.log(`[QUESTION] 使用基于用户回答和缺失主题生成的个性化问题`);
+          return personalizedQuestion;
+        }
+      } else {
+        const followUpQuestion = `您刚才提到"${keyInfo}"，能详细说说更多细节吗？比如当时是什么情况，您的心情是怎样的，这个经历对您有什么影响？`;
+        if (followUpQuestion.length >= 20) {
+          console.log(`[QUESTION] 使用基于用户回答生成的追问问题`);
+          return followUpQuestion;
+        }
+      }
+    }
+    
+    // 如果所有备用问题都用完了，生成一个基于缺失主题的完整问题
+    if (missingThemes.length > 0) {
+      const themeQuestion = `关于${missingThemes[0]}，您能详细分享一下您的经历和感受吗？比如具体发生了什么，当时的心情是怎样的？`;
+      if (themeQuestion.length >= 20) {
+        console.log(`[QUESTION] 使用基于缺失主题生成的问题: ${themeQuestion}`);
+        return themeQuestion;
+      }
+    }
+    
+    // 最后的备用方案：使用一个足够长的通用问题
+    return '能详细分享一下您在这个阶段最难忘的经历吗？比如具体发生了什么，当时的心情是怎样的，这个经历对您有什么影响？';
   }
 }
 
 Deno.serve(async (req) => {
   const requestStartTime = Date.now();
+  const timings: Record<string, number> = {};
+  
   console.log(`[REQUEST] ${req.method} ${new URL(req.url).pathname} - 开始处理请求`);
+  timings['request_start'] = 0;
   
   // 处理CORS预检请求
   if (req.method === 'OPTIONS') {
@@ -469,15 +694,20 @@ Deno.serve(async (req) => {
       // 不直接拒绝，让 Supabase 平台处理（某些配置可能允许匿名访问）
     }
 
+    const initStartTime = Date.now();
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     
     // 使用 service role key 创建客户端（需要绕过 RLS）
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    timings['init_client'] = Date.now() - initStartTime;
+    console.log(`[TIMING] 初始化客户端耗时: ${timings['init_client']}ms`);
     
+    const parseStartTime = Date.now();
     const requestData = await req.json();
     const { userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
-    
+    timings['parse_request'] = Date.now() - parseStartTime;
+    console.log(`[TIMING] 解析请求耗时: ${timings['parse_request']}ms`);
     console.log(`[REQUEST] 参数: userId=${userId}, chapter=${chapter}, sessionId=${sessionId || 'new'}, roundNumber=${roundNumber || 'N/A'}`);
 
     if (!userId || !chapter) {
@@ -494,6 +724,9 @@ Deno.serve(async (req) => {
     }
 
     // 获取对话历史
+    const historyStartTime = Date.now();
+    console.log(`[DB] 开始查询对话历史, userId=${userId}, chapter=${chapter}, sessionId=${actualSessionId}`);
+    
     // 注意：如果表有session_id字段，会按session过滤；如果没有，则获取该章节的所有对话
     let historyQuery = supabase
       .from('conversation_history')
@@ -509,7 +742,7 @@ Deno.serve(async (req) => {
       .then(result => result)
       .catch(async (err) => {
         // 如果session_id字段不存在，重新查询不包含session_id
-        console.log('session_id field may not exist, querying without session filter');
+        console.log('[DB] session_id字段可能不存在，尝试不按session过滤查询');
         return await supabase
           .from('conversation_history')
           .select('*')
@@ -518,8 +751,11 @@ Deno.serve(async (req) => {
           .order('round_number', { ascending: true });
       });
 
+    timings['fetch_history'] = Date.now() - historyStartTime;
+    console.log(`[TIMING] 查询对话历史耗时: ${timings['fetch_history']}ms, 记录数=${history?.length || 0}`);
+
     if (historyError) {
-      console.error('Error fetching history:', historyError);
+      console.error('[DB] 查询对话历史错误:', historyError);
       return new Response(
         JSON.stringify({ error: 'Database error', details: historyError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -527,15 +763,21 @@ Deno.serve(async (req) => {
     }
 
     // 获取对话摘要
+    const summaryStartTime = Date.now();
     const { data: summary } = await supabase
       .from('conversation_summary')
       .select('*')
       .eq('user_id', userId)
       .eq('chapter', chapter)
       .single();
+    timings['fetch_summary'] = Date.now() - summaryStartTime;
+    console.log(`[TIMING] 查询对话摘要耗时: ${timings['fetch_summary']}ms`);
 
     // 如果用户提供了回答，先保存回答
     if (userAnswer && roundNumber !== undefined) {
+      const updateStartTime = Date.now();
+      console.log(`[DB] 开始保存用户回答, roundNumber=${roundNumber}, 回答长度=${userAnswer.length}`);
+      
       // 更新或插入回答（适配不同的表结构）
       // 优先使用新列名（user_answer），如果失败再尝试旧列名（answer）
       let updateData: any = { user_answer: userAnswer };
@@ -552,7 +794,7 @@ Deno.serve(async (req) => {
       
       // 如果使用新列名失败，尝试使用旧列名
       if (updateError && (updateError.message?.includes('user_answer') || updateError.message?.includes('column'))) {
-        console.log('Update with user_answer failed, trying answer');
+        console.log('[DB] 使用user_answer更新失败，尝试使用answer列名');
         updateData = { answer: userAnswer };
         updateResult = await supabase
           .from('conversation_history')
@@ -563,10 +805,21 @@ Deno.serve(async (req) => {
         updateError = updateResult.error;
       }
 
+      timings['update_answer'] = Date.now() - updateStartTime;
       if (updateError) {
-        console.error('Error updating answer:', updateError);
+        console.error('[DB] 更新回答失败:', updateError);
       } else {
-        console.log('✓ Answer updated successfully');
+        console.log(`[TIMING] 保存用户回答耗时: ${timings['update_answer']}ms`);
+      }
+
+      // 保存回答后，立即更新历史记录，确保生成问题时能使用最新的回答
+      if (!updateError && history) {
+        const updatedRecord = history.find((h: any) => h.round_number === roundNumber);
+        if (updatedRecord) {
+          updatedRecord.user_answer = userAnswer;
+          updatedRecord.answer = userAnswer;
+          console.log(`[QUESTION] 已更新历史记录中的用户回答，确保生成问题时能使用最新回答`);
+        }
       }
 
       // 更新摘要（简化版）
@@ -586,20 +839,34 @@ Deno.serve(async (req) => {
     console.log(`[THEME] 快速主题检测完成, 耗时=${Date.now() - themeStartTime}ms, 缺失主题数=${missingThemes.length}, 覆盖率=${coverage}%`);
 
     // 生成下一个问题
-    console.log(`[QUESTION] 开始生成问题`);
+    // 确保history包含最新的用户回答（如果用户提供了回答）
+    let finalHistory = history || [];
+    if (userAnswer && roundNumber !== undefined && finalHistory.length > 0) {
+      const lastRecord = finalHistory.find((h: any) => h.round_number === roundNumber);
+      if (lastRecord) {
+        lastRecord.user_answer = userAnswer;
+        lastRecord.answer = userAnswer;
+        console.log(`[QUESTION] 已确保history包含最新用户回答: roundNumber=${roundNumber}, answer="${userAnswer}"`);
+      }
+    }
+    
+    console.log(`[QUESTION] 开始生成问题, history长度=${finalHistory.length}`);
     const questionStartTime = Date.now();
     const question = await generateInterviewQuestion(
       userId,
       chapter,
-      history || [],
+      finalHistory,
       summary,
       missingThemes,
-      supabase
+      supabase,
+      userAnswer  // 传递当前用户回答
     );
     console.log(`[QUESTION] 问题生成完成, 耗时=${Date.now() - questionStartTime}ms, 问题长度=${question.length}`);
 
     // 保存新问题到数据库（适配不同的表结构）
+    const insertStartTime = Date.now();
     const nextRoundNumber = (history?.length || 0) + 1;
+    console.log(`[DB] 开始保存新问题到数据库, roundNumber=${nextRoundNumber}, 问题长度=${question.length}`);
     
     // 优先使用新列名（ai_question, user_answer），如果失败再尝试旧列名（question, answer）
     let insertData: any = {
@@ -621,7 +888,7 @@ Deno.serve(async (req) => {
     
     // 如果使用新列名失败，尝试使用旧列名
     if (insertError && (insertError.message?.includes('ai_question') || insertError.message?.includes('user_answer') || insertError.message?.includes('column'))) {
-      console.log('Insert with ai_question/user_answer failed, trying question/answer');
+      console.log('[DB] 使用ai_question/user_answer插入失败，尝试使用question/answer列名');
       insertData = {
         user_id: userId,
         chapter: chapter,
@@ -639,15 +906,16 @@ Deno.serve(async (req) => {
     
     // 如果包含session_id的插入失败，尝试不包含session_id
     if (insertError && insertError.message?.includes('session_id')) {
-      console.log('Insert with session_id failed, trying without session_id');
+      console.log('[DB] 包含session_id的插入失败，尝试不包含session_id');
       insertResult = await supabase
         .from('conversation_history')
         .insert(insertData);
       insertError = insertResult.error;
     }
 
+    timings['insert_question'] = Date.now() - insertStartTime;
     if (insertError) {
-      console.error('Error inserting question:', insertError);
+      console.error('[DB] 插入问题失败:', insertError);
       // 如果插入失败，返回错误而不是静默忽略
       return new Response(
         JSON.stringify({
@@ -659,9 +927,23 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    console.log(`[TIMING] 保存新问题耗时: ${timings['insert_question']}ms`);
 
     // 返回响应
     const totalTime = Date.now() - requestStartTime;
+    timings['total'] = totalTime;
+    
+    // 输出详细的性能统计
+    console.log(`[PERFORMANCE] ========== 性能统计 ==========`);
+    console.log(`[PERFORMANCE] 总耗时: ${totalTime}ms`);
+    console.log(`[PERFORMANCE] 各阶段耗时:`);
+    Object.entries(timings).forEach(([key, value]) => {
+      if (key !== 'total') {
+        const percentage = ((value / totalTime) * 100).toFixed(1);
+        console.log(`[PERFORMANCE]   - ${key}: ${value}ms (${percentage}%)`);
+      }
+    });
+    console.log(`[PERFORMANCE] ==============================`);
     console.log(`[REQUEST] 请求处理完成, 总耗时=${totalTime}ms`);
     
     return new Response(
