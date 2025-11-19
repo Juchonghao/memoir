@@ -278,6 +278,11 @@ async function detectMissingThemes(
   summary: any,
   supabase: any
 ): Promise<{ missingThemes: string[]; coverage: number }> {
+  // 如果chapter是'全部'，返回空的主题列表（跨章节对话不检测主题）
+  if (chapter === '全部' || !chapter) {
+    return { missingThemes: [], coverage: 0 };
+  }
+  
   const config = chapterConfig[chapter];
   if (!config) {
     return { missingThemes: [], coverage: 0 };
@@ -402,13 +407,43 @@ async function generateInterviewQuestion(
   supabase: any,
   currentUserAnswer?: string  // 添加当前用户回答参数
 ): Promise<string> {
-  const config = chapterConfig[chapter];
-  if (!config) {
-    throw new Error(`Unknown chapter: ${chapter}`);
+  // 如果chapter是'全部'或未指定，尝试从历史记录中推断，或使用第一个章节
+  let actualChapter = chapter;
+  if (chapter === '全部' || !chapter) {
+    if (history && history.length > 0) {
+      // 从历史记录中获取最常见的chapter
+      const chapterCounts: Record<string, number> = {};
+      history.forEach((h: any) => {
+        const ch = h.chapter;
+        if (ch) {
+          chapterCounts[ch] = (chapterCounts[ch] || 0) + 1;
+        }
+      });
+      const mostCommonChapter = Object.entries(chapterCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+      actualChapter = mostCommonChapter || Object.keys(chapterConfig)[0];
+      console.log(`[QUESTION] chapter未指定，从历史记录推断: ${actualChapter}`);
+    } else {
+      // 如果没有历史记录，使用第一个章节
+      actualChapter = Object.keys(chapterConfig)[0];
+      console.log(`[QUESTION] chapter未指定且无历史记录，使用默认章节: ${actualChapter}`);
+    }
+  }
+  
+  let config = chapterConfig[actualChapter];
+  if (!config || actualChapter === '全部') {
+    // 如果配置不存在或是'全部'，使用第一个章节的配置
+    actualChapter = Object.keys(chapterConfig)[0];
+    config = chapterConfig[actualChapter];
+    console.log(`[QUESTION] chapter配置不存在或是'全部'，使用默认章节: ${actualChapter}`);
   }
 
   // 如果没有历史记录，返回第一个问题
   if (!history || history.length === 0) {
+    if (!config || !config.fallbackQuestions || config.fallbackQuestions.length === 0) {
+      // 如果配置仍然不存在，使用第一个章节的配置
+      const firstChapter = Object.keys(chapterConfig)[0];
+      return chapterConfig[firstChapter].fallbackQuestions[0];
+    }
     return config.fallbackQuestions[0];
   }
 
@@ -424,7 +459,11 @@ async function generateInterviewQuestion(
       lastQuestion = recentHistory[recentHistory.length - 1].question || recentHistory[recentHistory.length - 1].ai_question;
     }
     
-    let prompt = `我正在和一位老人进行人生访谈，当前章节是"${chapter}"（${config.description}）。\n\n`;
+    // 构建prompt，如果chapter是'全部'，说明是跨章节连续对话
+    const chapterDesc = actualChapter === '全部' || !chapter 
+      ? '正在进行连续对话，不限定特定章节' 
+      : config.description;
+    let prompt = `我正在和一位老人进行人生访谈${actualChapter !== '全部' && chapter ? `，当前章节是"${actualChapter}"（${chapterDesc}）` : '，这是连续对话，不限定特定章节'}。\n\n`;
     
     // 如果用户有最新回答，优先强调
     if (lastAnswer && lastAnswer.length > 0) {
@@ -478,8 +517,8 @@ async function generateInterviewQuestion(
       prompt += '\n';
     }
     
-    // 添加缺失主题提示
-    if (missingThemes.length > 0) {
+    // 添加缺失主题提示（如果提供了chapter）
+    if (missingThemes.length > 0 && actualChapter !== '全部') {
       prompt += `【需要补充的内容】\n`;
       prompt += `以下主题还未充分讨论，请优先引导用户分享：${missingThemes.slice(0, 3).join('、')}\n\n`;
     }
@@ -504,7 +543,7 @@ async function generateInterviewQuestion(
     prompt += `   - 必须至少20-40字，绝对不能少于20字\n`;
     prompt += `   - 避免空泛的问题，要具体到细节\n`;
     prompt += `   - 避免使用模板化的问题（如"关于XX，您能详细分享一下..."），要个性化\n`;
-    if (missingThemes.length > 0) {
+    if (missingThemes.length > 0 && actualChapter !== '全部') {
       prompt += `5. **引导缺失主题**：在保持话题连贯的前提下，可以自然引导到缺失的主题\n`;
     }
     prompt += `6. **语气温暖、亲切**：像朋友聊天一样，不要生硬\n`;
@@ -708,14 +747,17 @@ Deno.serve(async (req) => {
     const { userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
     timings['parse_request'] = Date.now() - parseStartTime;
     console.log(`[TIMING] 解析请求耗时: ${timings['parse_request']}ms`);
-    console.log(`[REQUEST] 参数: userId=${userId}, chapter=${chapter}, sessionId=${sessionId || 'new'}, roundNumber=${roundNumber || 'N/A'}`);
+    console.log(`[REQUEST] 参数: userId=${userId}, chapter=${chapter || '未指定（连续对话）'}, sessionId=${sessionId || 'new'}, roundNumber=${roundNumber || 'N/A'}`);
 
-    if (!userId || !chapter) {
+    if (!userId) {
       return new Response(
-        JSON.stringify({ error: 'userId and chapter are required' }),
+        JSON.stringify({ error: 'userId is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    // chapter现在是可选的，如果不提供则进行连续对话（跨章节）
+    // 如果提供了chapter，则按章节过滤；如果不提供，则获取所有对话
 
     // 如果没有sessionId，创建新的会话
     let actualSessionId = sessionId;
@@ -725,14 +767,19 @@ Deno.serve(async (req) => {
 
     // 获取对话历史
     const historyStartTime = Date.now();
-    console.log(`[DB] 开始查询对话历史, userId=${userId}, chapter=${chapter}, sessionId=${actualSessionId}`);
+    console.log(`[DB] 开始查询对话历史, userId=${userId}, chapter=${chapter || '全部（连续对话）'}, sessionId=${actualSessionId}`);
     
-    // 注意：如果表有session_id字段，会按session过滤；如果没有，则获取该章节的所有对话
+    // 注意：如果表有session_id字段，会按session过滤
+    // chapter现在是可选的：如果提供则按chapter过滤，如果不提供则获取所有对话（跨章节连续对话）
     let historyQuery = supabase
       .from('conversation_history')
       .select('*')
-      .eq('user_id', userId)
-      .eq('chapter', chapter);
+      .eq('user_id', userId);
+    
+    // 如果提供了chapter，则按chapter过滤
+    if (chapter) {
+      historyQuery = historyQuery.eq('chapter', chapter);
+    }
     
     // 尝试按session_id过滤（如果字段存在）
     // 如果字段不存在，查询会返回错误，我们捕获它并继续
@@ -743,12 +790,14 @@ Deno.serve(async (req) => {
       .catch(async (err) => {
         // 如果session_id字段不存在，重新查询不包含session_id
         console.log('[DB] session_id字段可能不存在，尝试不按session过滤查询');
-        return await supabase
+        let fallbackQuery = supabase
           .from('conversation_history')
           .select('*')
-          .eq('user_id', userId)
-          .eq('chapter', chapter)
-          .order('round_number', { ascending: true });
+          .eq('user_id', userId);
+        if (chapter) {
+          fallbackQuery = fallbackQuery.eq('chapter', chapter);
+        }
+        return await fallbackQuery.order('round_number', { ascending: true });
       });
 
     timings['fetch_history'] = Date.now() - historyStartTime;
@@ -762,14 +811,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 获取对话摘要
+    // 获取对话摘要（如果提供了chapter，则按chapter查询；否则查询所有摘要）
     const summaryStartTime = Date.now();
-    const { data: summary } = await supabase
+    let summaryQuery = supabase
       .from('conversation_summary')
       .select('*')
-      .eq('user_id', userId)
-      .eq('chapter', chapter)
-      .single();
+      .eq('user_id', userId);
+    
+    if (chapter) {
+      summaryQuery = summaryQuery.eq('chapter', chapter);
+    }
+    
+    const { data: summary } = chapter 
+      ? await summaryQuery.single()
+      : await summaryQuery;  // 如果不提供chapter，获取所有摘要（取最新的或合并）
+    
     timings['fetch_summary'] = Date.now() - summaryStartTime;
     console.log(`[TIMING] 查询对话摘要耗时: ${timings['fetch_summary']}ms`);
 
@@ -783,25 +839,33 @@ Deno.serve(async (req) => {
       let updateData: any = { user_answer: userAnswer };
       
       let updateError = null;
-      let updateResult = await supabase
+      let updateQuery = supabase
         .from('conversation_history')
         .update(updateData)
         .eq('user_id', userId)
-        .eq('chapter', chapter)
         .eq('round_number', roundNumber);
       
+      // 如果提供了chapter，则按chapter过滤
+      if (chapter) {
+        updateQuery = updateQuery.eq('chapter', chapter);
+      }
+      
+      let updateResult = await updateQuery;
       updateError = updateResult.error;
       
       // 如果使用新列名失败，尝试使用旧列名
       if (updateError && (updateError.message?.includes('user_answer') || updateError.message?.includes('column'))) {
         console.log('[DB] 使用user_answer更新失败，尝试使用answer列名');
         updateData = { answer: userAnswer };
-        updateResult = await supabase
+        updateQuery = supabase
           .from('conversation_history')
           .update(updateData)
           .eq('user_id', userId)
-          .eq('chapter', chapter)
           .eq('round_number', roundNumber);
+        if (chapter) {
+          updateQuery = updateQuery.eq('chapter', chapter);
+        }
+        updateResult = await updateQuery;
         updateError = updateResult.error;
       }
 
@@ -827,11 +891,12 @@ Deno.serve(async (req) => {
     }
 
     // 快速检测缺失的主题（使用关键词匹配，不等待LLM）
-    console.log(`[THEME] 开始快速主题检测, 历史记录数=${history?.length || 0}`);
+    // 如果提供了chapter，则检测该章节的主题；如果不提供，则检测所有章节的主题
+    console.log(`[THEME] 开始快速主题检测, 历史记录数=${history?.length || 0}, chapter=${chapter || '全部'}`);
     const themeStartTime = Date.now();
     const { missingThemes, coverage } = await detectMissingThemes(
       userId,
-      chapter,
+      chapter || '全部',  // 如果不提供chapter，使用'全部'作为标识
       history || [],
       summary,
       supabase
@@ -850,11 +915,11 @@ Deno.serve(async (req) => {
       }
     }
     
-    console.log(`[QUESTION] 开始生成问题, history长度=${finalHistory.length}`);
+    console.log(`[QUESTION] 开始生成问题, history长度=${finalHistory.length}, chapter=${chapter || '未指定（连续对话）'}`);
     const questionStartTime = Date.now();
     const question = await generateInterviewQuestion(
       userId,
-      chapter,
+      chapter || '全部',  // 如果不提供chapter，使用'全部'作为标识
       finalHistory,
       summary,
       missingThemes,
@@ -866,12 +931,25 @@ Deno.serve(async (req) => {
     // 保存新问题到数据库（适配不同的表结构）
     const insertStartTime = Date.now();
     const nextRoundNumber = (history?.length || 0) + 1;
-    console.log(`[DB] 开始保存新问题到数据库, roundNumber=${nextRoundNumber}, 问题长度=${question.length}`);
+    console.log(`[DB] 开始保存新问题到数据库, roundNumber=${nextRoundNumber}, 问题长度=${question.length}, chapter=${chapter || '未指定'}`);
     
     // 优先使用新列名（ai_question, user_answer），如果失败再尝试旧列名（question, answer）
+    // 如果chapter未提供，使用一个默认值（如"全部"）或者从历史记录中推断
+    let actualChapter = chapter;
+    if (!actualChapter && history && history.length > 0) {
+      // 从历史记录中获取最后一个chapter，或者使用默认值
+      const lastChapter = history[history.length - 1].chapter;
+      actualChapter = lastChapter || '全部';
+      console.log(`[DB] chapter未提供，从历史记录推断: ${actualChapter}`);
+    } else if (!actualChapter) {
+      // 如果没有历史记录，使用默认值
+      actualChapter = '全部';
+      console.log(`[DB] chapter未提供且无历史记录，使用默认值: ${actualChapter}`);
+    }
+    
     let insertData: any = {
       user_id: userId,
-      chapter: chapter,
+      chapter: actualChapter,
       round_number: nextRoundNumber,
       ai_question: question, // 优先使用新列名
       user_answer: '', // 优先使用新列名
@@ -891,7 +969,7 @@ Deno.serve(async (req) => {
       console.log('[DB] 使用ai_question/user_answer插入失败，尝试使用question/answer列名');
       insertData = {
         user_id: userId,
-        chapter: chapter,
+        chapter: actualChapter,  // 使用推断出的chapter
         round_number: nextRoundNumber,
         question: question, // 使用旧列名
         answer: '', // 使用旧列名
@@ -954,6 +1032,7 @@ Deno.serve(async (req) => {
           sessionId: actualSessionId,
           roundNumber: nextRoundNumber,
           totalRounds: nextRoundNumber,
+          chapter: actualChapter,  // 返回实际使用的chapter
           missingThemes: missingThemes.slice(0, 5), // 返回前5个缺失主题
           coverage: Math.round(coverage),
           suggestions: missingThemes.length > 0 
