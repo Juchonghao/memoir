@@ -484,7 +484,32 @@ async function generateSmartQuestion(
     return '您好，我是记者小陈，请问您怎么称呼呀？';
   }
 
-  // 如果没有API密钥，使用备用问题库
+  // 检查是否在阶段一（关系建立）- 检查是否有已回答的问题
+  const hasAnsweredQuestions = history.filter(h => h.answer && h.answer.trim().length > 0).length > 0;
+  
+  // 如果没有已回答的问题，说明还在阶段一，继续询问姓名等基础信息
+  if (!hasAnsweredQuestions) {
+    // 检查是否已经问过姓名
+    const hasAskedName = history.some(h => 
+      h.question && (h.question.includes('称呼') || h.question.includes('姓名') || h.question.includes('名字'))
+    );
+    
+    if (!hasAskedName) {
+      return '您好，我是记者小陈，请问您怎么称呼呀？';
+    }
+    
+    // 如果问过姓名但还没有回答，继续等待回答
+    // 如果问过姓名且有回答，继续阶段一的其他问题
+    const lastRecord = history[history.length - 1];
+    const lastAnswer = lastRecord?.answer || '';
+    
+    if (!lastAnswer || lastAnswer.trim().length === 0) {
+      // 还在等待回答，返回一个温和的提示
+      return '您方便告诉我您的名字吗？';
+    }
+  }
+
+  // 如果没有API密钥，使用备用问题库（但只在有已回答问题的情况下）
   if (!geminiApiKey) {
     console.log('No API key, using fallback questions');
     const usedQuestions = history.map(h => h.question);
@@ -799,10 +824,49 @@ Deno.serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
-    const requestData = await req.json();
+    let requestData;
+    try {
+      requestData = await req.json();
+    } catch (e) {
+      console.error('Failed to parse request body:', e);
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON in request body', details: e.message }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const { action, userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
 
-    console.log('Request:', { action, userId, chapter, sessionId, roundNumber });
+    console.log('Request received:', JSON.stringify({ action, userId, chapter, sessionId, roundNumber, hasUserAnswer: !!userAnswer }, null, 2));
+    console.log('Full request data:', JSON.stringify(requestData, null, 2));
+    
+    // 验证 action 参数
+    if (!action) {
+      console.error('Missing action parameter');
+      console.error('Request data keys:', Object.keys(requestData));
+      console.error('Request data:', requestData);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Missing action parameter', 
+          received: Object.keys(requestData),
+          requestData: requestData
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // 验证 action 类型
+    if (typeof action !== 'string') {
+      console.error('Invalid action type:', typeof action, action);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid action type', 
+          received: action,
+          type: typeof action
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // 测试端点
     if (action === 'testGemini') {
@@ -1235,8 +1299,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 如果没有匹配到任何 action，返回错误
+    console.error('Invalid action:', action, 'Available actions: testGemini, getEnvInfo, generateUserAnswer, getNextQuestion, saveAnswer, classifyContent');
     return new Response(
-      JSON.stringify({ error: 'Invalid action' }),
+      JSON.stringify({ 
+        error: 'Invalid action',
+        received: action,
+        available: ['testGemini', 'getEnvInfo', 'generateUserAnswer', 'getNextQuestion', 'saveAnswer', 'classifyContent']
+      }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

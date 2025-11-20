@@ -78,10 +78,16 @@ async function generateMemoirStream(
   const maxTokens = parseInt(Deno.env.get('OPENAI_MAX_TOKENS') || '4000');
 
   // 构建访谈数据（适配不同的表结构）
-  const interviewData = conversations.map(c => ({
-    question: c.question || c.ai_question,
-    answer: c.answer || c.user_answer
-  }));
+  // 只使用已回答的问题，过滤掉没有回答或回答为空的问题
+  const interviewData = conversations
+    .filter(c => {
+      const answer = c.answer || c.user_answer || '';
+      return answer.trim().length > 0; // 只保留有回答的问题
+    })
+    .map(c => ({
+      question: c.question || c.ai_question,
+      answer: c.answer || c.user_answer
+    }));
 
   const systemPrompt = `你是一位专业的传记作家，擅长将人生故事转化为优美的文学作品。
 
@@ -89,23 +95,25 @@ async function generateMemoirStream(
 标题：${title}
 ${chapter ? `章节：${chapter}` : ''}
 
-访谈内容（这是唯一的信息来源）：
+访谈内容（这是唯一的信息来源，只包含用户已回答的问题）：
 ${JSON.stringify(interviewData, null, 2)}
 
 【⚠️ 核心要求 - 必须严格遵守】：
 1. **只能使用访谈内容中明确提到的信息**：所有事实、细节、人物、地点、时间都必须来自上述访谈内容
 2. **绝对禁止编造或虚构**：如果访谈中没有提到某个信息，绝对不能自行添加、推测或编造
-3. **如果信息不足**：可以如实说明信息有限，但绝不能为了"丰富内容"而添加不存在的信息
-4. **可以做的**：
+3. **只使用已回答的问题**：上述访谈内容已经过滤，只包含用户已回答的问题。如果某个问题没有回答，不要使用该问题
+4. **如果信息不足**：可以如实说明信息有限，但绝不能为了"丰富内容"而添加不存在的信息
+5. **可以做的**：
    - 将访谈中的问答转化为流畅的叙事文字
    - 使用文学化的语言表达访谈中提到的内容
    - 组织访谈内容的逻辑顺序
    - 添加适当的情感色彩和文学修饰（但事实必须来自访谈）
-5. **不能做的**：
+6. **不能做的**：
    - 添加访谈中未提及的人物、事件、地点
    - 推测或想象访谈中未说明的细节
    - 为了故事完整性而编造情节
    - 添加任何访谈中不存在的信息
+   - 使用未回答的问题或推测未回答问题的答案
 
 请根据访谈内容，创作一篇个人传记。要求：
 1. 使用第一人称或第三人称叙事
@@ -130,13 +138,16 @@ ${JSON.stringify(interviewData, null, 2)}
           role: 'system',
           content: `你是一位专业的传记作家，擅长将人生故事转化为优美的文学作品。
 
-【核心原则】：
-1. 你只能使用访谈内容中明确提到的信息，绝对不能添加、推测或编造任何未提及的事实
-2. 如果访谈中没有提到某个信息，你必须如实处理，不能为了"丰富内容"而虚构
-3. 你的任务是：将访谈中的问答转化为流畅的叙事文字，使用文学化的语言表达，但所有事实必须100%来自访谈内容
-4. 可以添加情感色彩和文学修饰，但事实基础必须完全来自访谈
+【核心原则 - 必须严格遵守】：
+1. **只使用已回答的问题**：你只能使用访谈内容中已回答的问题，绝对不能使用未回答的问题或推测未回答问题的答案
+2. **只能使用明确提到的信息**：所有事实、细节、人物、地点、时间都必须来自访谈内容中明确提到的信息
+3. **绝对禁止编造**：绝对不能添加、推测或编造任何未提及的事实
+4. **如果信息不足**：如果访谈中没有提到某个信息，你必须如实处理，不能为了"丰富内容"而虚构
+5. **你的任务**：将访谈中的问答转化为流畅的叙事文字，使用文学化的语言表达，但所有事实必须100%来自访谈内容
+6. **可以做的**：添加情感色彩和文学修饰，但事实基础必须完全来自访谈
+7. **不能做的**：使用未回答的问题、推测未回答问题的答案、添加访谈中不存在的信息
 
-请严格遵守以上原则，确保生成的传记完全基于真实访谈内容。`
+请严格遵守以上原则，确保生成的传记完全基于真实访谈内容，只使用已回答的问题。`
         },
         {
           role: 'user',
@@ -517,9 +528,11 @@ Deno.serve(async (req) => {
     console.log(`Found ${conversations.length} conversations for user ${userId}${chapter ? `, chapter ${chapter}` : ''}`);
 
     // 过滤出有完整问答的对话（适配不同的列名）
+    // 重要：只使用已回答的问题，过滤掉没有回答或回答为空的问题
     const validConversations = conversations.filter(c => {
       const hasQuestion = !!(c.question || c.ai_question);
-      const hasAnswer = !!(c.answer || c.user_answer);
+      const answer = c.answer || c.user_answer || '';
+      const hasAnswer = answer.trim().length > 0; // 确保回答不为空
       return hasQuestion && hasAnswer;
     });
 
