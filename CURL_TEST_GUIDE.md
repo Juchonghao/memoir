@@ -86,8 +86,7 @@ curl -X POST "https://lafpbfjtbupootnpornv.supabase.co/functions/v1/interview-st
   -H "Authorization: Bearer f0792984a8ea66e257abb9db598a4d4432c08db6a5554fe44aeb2c6b2700775f" \
   -d '{
     "userId": "550e8400-e29b-41d4-a716-446655440000",
-    "chapter": "童年故里",
-    "sessionId": "session_1763516930643_uxr5d6h7f",
+    "sessionId": "session_1763517417235_diswv6150",
     "userAnswer": "我爱吃鱼香肉丝",
     "roundNumber": 1
   }' | jq '.'
