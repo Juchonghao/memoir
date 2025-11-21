@@ -796,9 +796,9 @@ ${JSON.stringify(interviewData, null, 2)}
         return errorResponse('BAD_REQUEST', 'writingStyle is required');
       }
 
-      // 调用memoir-generate Edge Function
+      // 调用memoir_generate Edge Function
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-      const functionUrl = `${supabaseUrl}/functions/v1/memoir-generate`;
+      const functionUrl = `${supabaseUrl}/functions/v1/memoir_generate`;
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
       const functionResponse = await fetch(functionUrl, {

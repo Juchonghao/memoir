@@ -43,7 +43,7 @@ export default function InspirationInput({ chapter, userId, onSaved }: Inspirati
     setIsClassifying(true)
     try {
       // 使用DeepSeek API进行内容分类
-      const { data, error } = await supabase.functions.invoke('ai-interviewer-smart', {
+      const { data, error } = await supabase.functions.invoke('interviewer_smart', {
         body: {
           action: 'classifyContent',
           text: text,

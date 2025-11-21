@@ -364,7 +364,7 @@ export default function InterviewPage() {
   const getNextQuestionFromSmart = async (userId: string, currentSessionId: string) => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.functions.invoke('ai-interviewer-smart', {
+      const { data, error } = await supabase.functions.invoke('interviewer_smart', {
         body: {
           action: 'getNextQuestion',
           userId: userId,
@@ -414,7 +414,7 @@ export default function InterviewPage() {
     setLoading(true)
     try {
       // 保存回答
-      const { data: saveData, error: saveError } = await supabase.functions.invoke('ai-interviewer-smart', {
+      const { data: saveData, error: saveError } = await supabase.functions.invoke('interviewer_smart', {
         body: {
           action: 'saveAnswer',
           userId: userId,
