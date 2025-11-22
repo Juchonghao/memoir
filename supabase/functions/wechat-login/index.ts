@@ -54,7 +54,17 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { code, action, nickname, avatar_url, gender, country, province, city } = requestData;
+    const { 
+      code,  // wx.login() 返回的code
+      phoneCode,  // wx.getPhoneNumber() 返回的code（新方式，推荐）
+      action, 
+      nickname, 
+      avatar_url, 
+      gender, 
+      country, 
+      province, 
+      city
+    } = requestData;
 
     if (!code) {
       return new Response(
@@ -89,6 +99,38 @@ Deno.serve(async (req) => {
 
     const { openid, session_key, unionid } = wxData;
 
+    // 获取手机号（使用新方式：通过phoneCode调用微信API）
+    let phoneNumber: string | null = null;
+    if (phoneCode) {
+      try {
+        // 先获取access_token
+        const tokenUrl = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${wechatAppId}&secret=${wechatAppSecret}`;
+        const tokenResponse = await fetch(tokenUrl);
+        const tokenData = await tokenResponse.json();
+        
+        if (tokenData.access_token) {
+          // 使用access_token和phoneCode获取手机号
+          const phoneUrl = `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${tokenData.access_token}`;
+          const phoneResponse = await fetch(phoneUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: phoneCode })
+          });
+          
+          const phoneData = await phoneResponse.json();
+          if (phoneData.errcode === 0 && phoneData.phone_info) {
+            phoneNumber = phoneData.phone_info.phoneNumber;
+            console.log('获取手机号成功:', phoneNumber?.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2'));
+          } else {
+            console.error('获取手机号失败:', phoneData);
+          }
+        }
+      } catch (phoneError) {
+        console.error('获取手机号异常:', phoneError);
+        // 如果获取手机号失败，继续使用openid作为标识
+      }
+    }
+
     // 使用Supabase Service Role创建或查找用户
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
@@ -99,7 +141,8 @@ Deno.serve(async (req) => {
 
     // 使用unionid（如果存在）或openid作为用户唯一标识
     const userId = unionid || openid;
-    const email = `${userId}@wechat.miniprogram`; // 虚拟邮箱
+    // 使用手机号作为邮箱（如果可用），否则使用虚拟邮箱
+    const email = phoneNumber ? `${phoneNumber}@wechat.miniprogram` : `${userId}@wechat.miniprogram`;
 
     // 尝试查找现有用户
     let authUser;
@@ -130,6 +173,7 @@ Deno.serve(async (req) => {
         };
 
         // 如果提供了新的用户信息，更新它们
+        if (phoneNumber) updateMetadata.phone = phoneNumber;
         if (nickname) updateMetadata.nickname = nickname;
         if (avatar_url) updateMetadata.avatar_url = avatar_url;
         if (gender !== undefined) updateMetadata.gender = gender;
@@ -158,10 +202,10 @@ Deno.serve(async (req) => {
     if (!authUser) {
       isNewUser = true;
       
-      // 注册时，用户信息是必需的
-      if (isRegister && !nickname) {
+      // 注册时，手机号是必需的
+      if (isRegister && !phoneNumber) {
         return new Response(
-          JSON.stringify({ error: '注册时请提供用户信息（nickname等）' }),
+          JSON.stringify({ error: '注册时请提供手机号（通过wx.getPhoneNumber获取phoneCode）' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -176,6 +220,7 @@ Deno.serve(async (req) => {
       };
 
       // 添加用户提供的信息
+      if (phoneNumber) userMetadata.phone = phoneNumber;
       if (nickname) userMetadata.nickname = nickname;
       if (avatar_url) userMetadata.avatar_url = avatar_url;
       if (gender !== undefined) userMetadata.gender = gender;
@@ -209,6 +254,7 @@ Deno.serve(async (req) => {
         .upsert({
           id: authUser.id,
           email: email,
+          phone: phoneNumber || null,  // 存储手机号
           full_name: authUser.user_metadata?.nickname || authUser.user_metadata?.full_name || null,
           avatar_url: authUser.user_metadata?.avatar_url || null,
           updated_at: new Date().toISOString()
@@ -246,6 +292,7 @@ Deno.serve(async (req) => {
         },
         openid: openid,
         unionid: unionid,
+        phone: phoneNumber,  // 返回手机号
         isNewUser: isNewUser, // 标识是否为新注册用户
         action: isRegister ? 'register' : 'login',
         // session_key不应该返回给前端，仅在后端使用
