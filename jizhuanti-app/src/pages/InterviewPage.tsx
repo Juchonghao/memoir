@@ -364,13 +364,19 @@ export default function InterviewPage() {
   const getNextQuestionFromSmart = async (userId: string, currentSessionId: string) => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.functions.invoke('interviewer_smart', {
-        body: {
-          action: 'getNextQuestion',
-          userId: userId,
-          chapter: CHAPTER_NAMES[chapter || 'childhood'],
-          sessionId: currentSessionId
-        }
+      // 确保函数名使用下划线，并且所有参数都正确传递
+      const functionName = 'interviewer_smart'
+      const requestBody = {
+        action: 'getNextQuestion',
+        userId: userId,
+        chapter: CHAPTER_NAMES[chapter || 'childhood'],
+        sessionId: currentSessionId
+      }
+      
+      console.log('调用函数:', functionName, '请求体:', requestBody)
+      
+      const { data, error } = await supabase.functions.invoke(functionName, {
+        body: requestBody
       })
 
       if (error) {
@@ -414,15 +420,20 @@ export default function InterviewPage() {
     setLoading(true)
     try {
       // 保存回答
-      const { data: saveData, error: saveError } = await supabase.functions.invoke('interviewer_smart', {
-        body: {
-          action: 'saveAnswer',
-          userId: userId,
-          chapter: CHAPTER_NAMES[chapter || 'childhood'],
-          sessionId: currentSessionId,
-          userAnswer: answer,
-          roundNumber: roundNumber
-        }
+      const functionName = 'interviewer_smart'
+      const requestBody = {
+        action: 'saveAnswer',
+        userId: userId,
+        chapter: CHAPTER_NAMES[chapter || 'childhood'],
+        sessionId: currentSessionId,
+        userAnswer: answer,
+        roundNumber: roundNumber
+      }
+      
+      console.log('保存回答 - 调用函数:', functionName, '请求体:', requestBody)
+      
+      const { data: saveData, error: saveError } = await supabase.functions.invoke(functionName, {
+        body: requestBody
       })
 
       if (saveError) {
