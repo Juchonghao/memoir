@@ -16,7 +16,7 @@ const chapterConfig = {
     description: '童年时期的成长经历、家庭环境、故乡记忆',
     themes: ['家庭背景', '童年趣事', '成长环境', '早期教育', '故乡印象'],
     fallbackQuestions: [
-      '请描述一下您的童年生活环境，比如住在哪里？家里有哪些人？',
+      '您小时候最喜欢在村里哪个地方玩呀？',
       '童年时期有什么让您印象深刻的事情吗？',
       '您的父母是做什么的？他们对您的成长有什么影响？',
       '您还记得小时候最喜欢做什么吗？',
@@ -562,7 +562,9 @@ async function generateSmartQuestionWithConfig(
       prompt += `【当前阶段：关系建立 - 阶段一】\n`;
       prompt += `这是第一次提问，请按照阶段一的要求，从询问姓名开始。\n`;
       prompt += `请用温柔、带画面感的方式开启，问一个场景化、具体化的问题，控制在50字以内。\n`;
-      prompt += `直接输出问题，不写分析。\n\n`;
+      prompt += `直接输出问题，不写分析，不要添加任何开场白或总结。\n`;
+      prompt += `只输出问题本身，例如："您好，我是记者小陈，请问您怎么称呼呀？"\n`;
+      prompt += `**重要：禁止假设用户的性别或称呼，不要使用"爷爷"、"奶奶"等称呼，使用"您"即可。禁止使用表情符号和方括号标注。**\n\n`;
       prompt += `请输出第一个问题（询问姓名）：`;
     } else {
       // 添加对话历史
@@ -593,13 +595,17 @@ async function generateSmartQuestionWithConfig(
         prompt += `3. 如果回答偏离主题（如身体需求），先温柔顺应，再找合适时机回到话题\n`;
         prompt += `4. 不要在一个问题上穷追猛打，问1-2次对不上就换问题\n`;
         prompt += `5. 问题要自然、温暖，像在聊天，不像被审问\n`;
-        prompt += `6. 绝不重复问过的问题\n\n`;
+        prompt += `6. 绝不重复问过的问题\n`;
+        prompt += `7. **禁止假设用户的性别或称呼**：不要使用"爷爷"、"奶奶"、"先生"、"女士"等称呼，除非用户明确告知。使用"您"即可。\n`;
+        prompt += `8. **禁止使用表情符号**：问题中不要包含任何emoji或表情符号\n`;
+        prompt += `9. **禁止使用方括号标注**：不要在问题中使用[ ]来标注语气、动作或情感，直接自然地表达\n\n`;
         prompt += `请输出分析+跟进问题：`;
       } else {
         // 如果上一轮回答为空，只输出问题
         prompt += `【当前状态】\n`;
         prompt += `上一轮回答为空，请用温柔、带画面感的方式开启，问一个场景化、具体化的问题，控制在50字以内。\n`;
-        prompt += `直接输出问题，不写分析。\n\n`;
+        prompt += `直接输出问题，不写分析。\n`;
+        prompt += `**重要：禁止假设用户的性别或称呼，不要使用"爷爷"、"奶奶"等称呼，使用"您"即可。禁止使用表情符号和方括号标注。**\n\n`;
         prompt += `请输出问题：`;
       }
     }
@@ -645,6 +651,59 @@ async function generateSmartQuestionWithConfig(
     // 移除所有括号中的内容（包括语气、情感等备注）
     question = question.replace(/[（(][^)）]*[)）]/g, '').trim();
     question = question.replace(/【[^】]*】/g, '').trim();
+    // 移除方括号中的内容（如[笑着换个话题]）
+    question = question.replace(/\[[^\]]*\]/g, '').trim();
+    // 移除表情符号（emoji）
+    question = question.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim();
+    question = question.replace(/[\u{2600}-\u{26FF}]/gu, '').trim();
+    question = question.replace(/[\u{2700}-\u{27BF}]/gu, '').trim();
+    // 移除常见的称呼（如果用户没有明确告知）
+    // 注意：这里只移除明显假设性的称呼，如果用户已经告知姓名，可以保留
+    question = question.replace(/\b(爷爷|奶奶|先生|女士|大爷|大妈)\b/g, '').trim();
+    // 清理多余的空格
+    question = question.replace(/\s+/g, ' ').trim();
+    
+    // 如果是首次提问，移除任何开场白（如"上次听您说起"、"欢迎回来"等）
+    if (isFirstQuestion) {
+      // 移除常见的开场白模式 - 更彻底的清理
+      // 移除"上次..."相关的内容（包括各种变体）
+      question = question.replace(/上次[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/上次听您说起[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/上次我们聊到了[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/欢迎回来[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/老人家[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/李爷爷[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/张爷爷[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/王爷爷[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      
+      // 移除开头的括号内容（语气描述）
+      question = question.replace(/^[（(][^)）]*[)）]\s*/, '');
+      
+      // 移除描述性内容（如"您描述得那么生动"等）
+      question = question.replace(/您描述[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/真是让人[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      question = question.replace(/仿佛都能[^。，！？\n]*?[。，！？\n]\s*/g, '');
+      
+      // 移除第一个句号、问号、感叹号之前的所有内容（如果包含开场关键词）
+      if (question.match(/上次|欢迎|描述|真是|仿佛/)) {
+        // 找到第一个问题标记（问号、感叹号等）
+        const firstQuestionMark = question.search(/[？?！!]/);
+        if (firstQuestionMark > 0) {
+          // 检查前面是否包含开场内容
+          const beforeQuestion = question.substring(0, firstQuestionMark);
+          if (beforeQuestion.match(/上次|欢迎|描述|真是|仿佛|老人家|爷爷/)) {
+            question = question.substring(firstQuestionMark + 1).trim();
+          }
+        }
+      }
+      
+      question = question.trim();
+      
+      // 如果清理后问题为空或太短，或者仍然包含开场关键词，使用默认问题
+      if (!question || question.length < 5 || question.match(/上次|欢迎|描述|真是|仿佛/)) {
+        question = '您好，我是记者小陈，请问您怎么称呼呀？';
+      }
+    }
     
     // 如果问题为空或太短，使用原始响应
     if (!question || question.length < 3) {
@@ -667,9 +726,19 @@ async function generateSmartQuestionWithConfig(
       }
       
       question = question.replace(/^问：|^问题：|^Q:|^下一个问题：/i, '').trim();
-      question = question.replace(/^["']|["']$/g, '').trim();
+      question = question.replace(/^["']|[""]$/g, '').trim();
       question = question.replace(/[（(][^)）]*[)）]/g, '').trim();
       question = question.replace(/【[^】]*】/g, '').trim();
+      // 移除方括号中的内容
+      question = question.replace(/\[[^\]]*\]/g, '').trim();
+      // 移除表情符号
+      question = question.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim();
+      question = question.replace(/[\u{2600}-\u{26FF}]/gu, '').trim();
+      question = question.replace(/[\u{2700}-\u{27BF}]/gu, '').trim();
+      // 移除假设性称呼
+      question = question.replace(/\b(爷爷|奶奶|先生|女士|大爷|大妈)\b/g, '').trim();
+      // 清理多余空格
+      question = question.replace(/\s+/g, ' ').trim();
       attempts++;
     }
     
@@ -1097,40 +1166,7 @@ Deno.serve(async (req) => {
         console.log('Generated new sessionId:', actualSessionId);
       }
 
-      // 检查是否有之前的session，如果有，生成总结开场
-      const { data: previousSessions } = await supabase
-        .from('conversation_history')
-        .select('session_id')
-        .eq('user_id', userId)
-        .eq('chapter', actualChapter)
-        .neq('session_id', actualSessionId)
-        .limit(1);
-
-      let openingQuestion: string | null = null;
-      
-      if (previousSessions && previousSessions.length > 0) {
-        // 有之前的会话，生成总结开场
-        const { data: previousHistory } = await supabase
-          .from('conversation_history')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('chapter', actualChapter)
-          .neq('session_id', actualSessionId)
-          .order('round_number', { ascending: true });
-
-        if (previousHistory && previousHistory.length > 0 && geminiApiKey) {
-          // 使用AI生成总结开场
-          const previousQA = previousHistory.slice(-3).map(h => `问：${h.question}\n答：${h.answer}`).join('\n\n');
-          const summaryPrompt = `上次我们聊到了：\n${previousQA}\n\n请生成一个简短的总结开场，提及上次的话题，然后引入新的问题。开场要温暖、自然。只输出开场话术，不要问题。`;
-          try {
-            openingQuestion = await callGemini(summaryPrompt, geminiApiKey);
-          } catch (e) {
-            openingQuestion = `欢迎回来！上次我们聊到了${actualChapter}的一些美好回忆，今天我们继续深入聊聊。`;
-          }
-        }
-      }
-
-      // 获取对话历史
+      // 获取当前session的对话历史
       const { data: history, error: historyError } = await supabase
         .from('conversation_history')
         .select('*')
@@ -1147,6 +1183,49 @@ Deno.serve(async (req) => {
         );
       }
 
+      // 检查是否有之前的session（不同的sessionId），如果有，生成总结开场
+      // 但只有在当前session没有历史记录时，才生成开场（说明是新的session，但用户之前聊过）
+      // 注意：对于首次请求，我们不生成openingQuestion，只返回固定的第一个问题
+      let openingQuestion: string | null = null;
+      const isNewSession = !history || history.length === 0;
+      
+      // 暂时禁用openingQuestion，确保首次请求只返回一个问题
+      // 如果需要恢复openingQuestion功能，可以取消下面的注释
+      /*
+      if (isNewSession) {
+        // 当前session没有历史记录，检查是否有其他session的历史
+        const { data: previousSessions } = await supabase
+          .from('conversation_history')
+          .select('session_id')
+          .eq('user_id', userId)
+          .eq('chapter', actualChapter)
+          .neq('session_id', actualSessionId)
+          .limit(1);
+
+        if (previousSessions && previousSessions.length > 0) {
+          // 有之前的会话，生成总结开场
+          const { data: previousHistory } = await supabase
+            .from('conversation_history')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('chapter', actualChapter)
+            .neq('session_id', actualSessionId)
+            .order('round_number', { ascending: true });
+
+          if (previousHistory && previousHistory.length > 0 && geminiApiKey) {
+            // 使用AI生成总结开场
+            const previousQA = previousHistory.slice(-3).map(h => `问：${h.question}\n答：${h.answer}`).join('\n\n');
+            const summaryPrompt = `上次我们聊到了：\n${previousQA}\n\n请生成一个简短的总结开场，提及上次的话题，然后引入新的问题。开场要温暖、自然。只输出开场话术，不要问题。`;
+            try {
+              openingQuestion = await callGemini(summaryPrompt, geminiApiKey);
+            } catch (e) {
+              openingQuestion = `欢迎回来！上次我们聊到了${actualChapter}的一些美好回忆，今天我们继续深入聊聊。`;
+            }
+          }
+        }
+      }
+      */
+
       // 获取对话摘要
       const { data: summary } = await supabase
         .from('conversation_summary')
@@ -1156,14 +1235,23 @@ Deno.serve(async (req) => {
         .single();
 
       // 生成问题
-      const question = await generateSmartQuestion(
-        userId,
-        actualChapter,
-        history || [],
-        summary,
-        supabase,
-        geminiApiKey
-      );
+      // 如果是新session（没有历史记录），第一个问题始终是固定的
+      let question: string;
+      if (isNewSession) {
+        // 新session的第一个问题始终是固定的，不管是否有openingQuestion
+        question = '您好，我是记者小陈，请问您怎么称呼呀？';
+        console.log('New session, using fixed first question');
+      } else {
+        // 有历史记录，使用AI生成问题
+        question = await generateSmartQuestion(
+          userId,
+          actualChapter,
+          history || [],
+          summary,
+          supabase,
+          geminiApiKey
+        );
+      }
 
       // 保存问题到数据库
       const nextRoundNumber = (history?.length || 0) + 1;
@@ -1189,12 +1277,20 @@ Deno.serve(async (req) => {
         );
       }
 
+      // 组合最终的问题
+      // 如果有openingQuestion，将其与问题组合；但第一个问题本身应该是固定的
+      let finalQuestion = question;
+      if (openingQuestion && isNewSession) {
+        // 新session且有openingQuestion，组合开场白和固定问题
+        finalQuestion = `${openingQuestion}\n\n${question}`;
+      }
+
       return new Response(
         JSON.stringify({ 
-          question: openingQuestion ? `${openingQuestion}\n\n${question}` : question,
+          question: finalQuestion,
           roundNumber: nextRoundNumber,
           sessionId: actualSessionId,  // 返回生成的sessionId
-          usingAI: !!geminiApiKey,
+          usingAI: !isNewSession,
           isReturningUser: !!openingQuestion
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
