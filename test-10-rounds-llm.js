@@ -14,7 +14,7 @@ function generateUUID() {
 // 调用API
 async function callAPI(action, body) {
   try {
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-interviewer-smart`, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/interviewer_smart`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

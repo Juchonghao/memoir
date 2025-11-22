@@ -474,17 +474,64 @@ async function generateSmartQuestion(
   supabase: any,
   geminiApiKey: string | null
 ): Promise<string> {
-  const config = chapterConfig[chapter];
+  // 如果chapter不存在，使用默认值
+  const actualChapter = chapter || '童年故里';
+  const config = chapterConfig[actualChapter];
   if (!config) {
-    throw new Error(`Unknown chapter: ${chapter}`);
+    // 如果配置不存在，使用默认配置
+    console.warn(`Unknown chapter: ${actualChapter}, using default config`);
+    const defaultConfig = chapterConfig['童年故里'];
+    if (!defaultConfig) {
+      throw new Error(`Unknown chapter: ${actualChapter} and default config not found`);
+    }
+    return generateSmartQuestionWithConfig(userId, actualChapter, defaultConfig, history, summary, supabase, geminiApiKey);
   }
+  
+  return generateSmartQuestionWithConfig(userId, actualChapter, config, history, summary, supabase, geminiApiKey);
+}
+
+// 内部函数：使用配置生成问题
+async function generateSmartQuestionWithConfig(
+  userId: string,
+  chapter: string,
+  config: typeof chapterConfig[keyof typeof chapterConfig],
+  history: ConversationHistory[],
+  summary: ConversationSummary | null,
+  supabase: any,
+  geminiApiKey: string | null
+): Promise<string> {
 
   // 如果没有历史记录，返回第一个问题（阶段一：询问姓名）
   if (!history || history.length === 0) {
     return '您好，我是记者小陈，请问您怎么称呼呀？';
   }
 
-  // 如果没有API密钥，使用备用问题库
+  // 检查是否在阶段一（关系建立）- 检查是否有已回答的问题
+  const hasAnsweredQuestions = history.filter(h => h.answer && h.answer.trim().length > 0).length > 0;
+  
+  // 如果没有已回答的问题，说明还在阶段一，继续询问姓名等基础信息
+  if (!hasAnsweredQuestions) {
+    // 检查是否已经问过姓名
+    const hasAskedName = history.some(h => 
+      h.question && (h.question.includes('称呼') || h.question.includes('姓名') || h.question.includes('名字'))
+    );
+    
+    if (!hasAskedName) {
+      return '您好，我是记者小陈，请问您怎么称呼呀？';
+    }
+    
+    // 如果问过姓名但还没有回答，继续等待回答
+    // 如果问过姓名且有回答，继续阶段一的其他问题
+    const lastRecord = history[history.length - 1];
+    const lastAnswer = lastRecord?.answer || '';
+    
+    if (!lastAnswer || lastAnswer.trim().length === 0) {
+      // 还在等待回答，返回一个温和的提示
+      return '您方便告诉我您的名字吗？';
+    }
+  }
+
+  // 如果没有API密钥，使用备用问题库（但只在有已回答问题的情况下）
   if (!geminiApiKey) {
     console.log('No API key, using fallback questions');
     const usedQuestions = history.map(h => h.question);
@@ -799,13 +846,94 @@ Deno.serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
-    const requestData = await req.json();
+    let requestData;
+    try {
+      requestData = await req.json();
+    } catch (e) {
+      console.error('Failed to parse request body:', e);
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON in request body', details: e.message }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const { action, userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
 
-    console.log('Request:', { action, userId, chapter, sessionId, roundNumber });
+    console.log('Request received:', JSON.stringify({ action, userId, chapter, sessionId, roundNumber, hasUserAnswer: !!userAnswer }, null, 2));
+    console.log('Full request data:', JSON.stringify(requestData, null, 2));
+    
+    // 验证 action 参数
+    // 如果没有action参数，尝试根据请求内容自动判断
+    let actualAction = action;
+    if (!actualAction) {
+      console.log('No action parameter provided, attempting to infer from request data');
+      console.log('Request data keys:', Object.keys(requestData));
+      console.log('Request data:', requestData);
+      
+      // 如果只有userId（chapter可选），可能是第一次调用，应该是getNextQuestion
+      if (requestData.userId && !requestData.userAnswer && !requestData.sessionId) {
+        actualAction = 'getNextQuestion';
+        console.log('Inferred action: getNextQuestion (first call)');
+      }
+      // 如果有userAnswer，应该是saveAnswer
+      else if (requestData.userId && requestData.userAnswer) {
+        actualAction = 'saveAnswer';
+        console.log('Inferred action: saveAnswer');
+      }
+      // 如果有sessionId但没有userAnswer，可能是获取下一个问题
+      else if (requestData.userId && requestData.sessionId && !requestData.userAnswer) {
+        actualAction = 'getNextQuestion';
+        console.log('Inferred action: getNextQuestion (with sessionId)');
+      }
+      // 如果还是无法判断，返回错误
+      else {
+        console.error('Cannot infer action from request data');
+        return new Response(
+          JSON.stringify({ 
+            error: 'Missing action parameter', 
+            message: 'Please provide an "action" parameter. Valid values: "getNextQuestion", "saveAnswer", "testGemini", "getEnvInfo", "classifyContent"',
+            received: Object.keys(requestData),
+            requestData: requestData,
+            example: {
+              getNextQuestion: {
+                action: 'getNextQuestion',
+                userId: 'string',
+                chapter: 'string (optional)',
+                sessionId: 'string (optional)'
+              },
+              saveAnswer: {
+                action: 'saveAnswer',
+                userId: 'string',
+                chapter: 'string (optional)',
+                sessionId: 'string',
+                userAnswer: 'string',
+                roundNumber: 'number'
+              }
+            }
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+    
+    // 验证 action 类型
+    if (typeof action !== 'string') {
+      console.error('Invalid action type:', typeof action, action);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid action type', 
+          received: action,
+          type: typeof action
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
+    // 使用推断的action
+    const actionToUse = actualAction;
+    
     // 测试端点
-    if (action === 'testGemini') {
+    if (actionToUse === 'testGemini') {
       if (!geminiApiKey) {
         return new Response(
           JSON.stringify({ 
@@ -841,7 +969,7 @@ Deno.serve(async (req) => {
     }
 
     // 获取环境信息
-    if (action === 'getEnvInfo') {
+    if (actionToUse === 'getEnvInfo') {
       return new Response(
         JSON.stringify({
           hasApiKey: !!geminiApiKey,
@@ -853,7 +981,7 @@ Deno.serve(async (req) => {
     }
 
     // 生成用户回答（用于测试）
-    if (action === 'generateUserAnswer') {
+    if (actionToUse === 'generateUserAnswer') {
       if (!geminiApiKey) {
         return new Response(
           JSON.stringify({ 
@@ -922,12 +1050,36 @@ Deno.serve(async (req) => {
     }
 
     // 获取下一个问题
-    if (action === 'getNextQuestion') {
-      if (!userId || !chapter || !sessionId) {
+    if (actionToUse === 'getNextQuestion') {
+      if (!userId) {
         return new Response(
-          JSON.stringify({ error: 'Missing required parameters' }),
+          JSON.stringify({ error: 'Missing required parameter: userId' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
+      }
+
+      // chapter是可选的，如果没有提供，尝试从历史记录中获取
+      let actualChapter = chapter;
+      if (!actualChapter && sessionId) {
+        // 如果有sessionId，尝试从历史记录中获取chapter
+        const { data: historyRecord } = await supabase
+          .from('conversation_history')
+          .select('chapter')
+          .eq('user_id', userId)
+          .eq('session_id', sessionId)
+          .limit(1)
+          .single();
+        
+        if (historyRecord?.chapter) {
+          actualChapter = historyRecord.chapter;
+          console.log('Inferred chapter from history:', actualChapter);
+        }
+      }
+      
+      // 如果还是没有chapter，使用默认值
+      if (!actualChapter) {
+        actualChapter = '童年故里'; // 默认章节
+        console.log('Using default chapter:', actualChapter);
       }
 
       // 检查是否有之前的session，如果有，生成总结开场
@@ -935,7 +1087,7 @@ Deno.serve(async (req) => {
         .from('conversation_history')
         .select('session_id')
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .neq('session_id', sessionId)
         .limit(1);
 
@@ -947,7 +1099,7 @@ Deno.serve(async (req) => {
           .from('conversation_history')
           .select('*')
           .eq('user_id', userId)
-          .eq('chapter', chapter)
+          .eq('chapter', actualChapter)
           .neq('session_id', sessionId)
           .order('round_number', { ascending: true });
 
@@ -958,7 +1110,7 @@ Deno.serve(async (req) => {
           try {
             openingQuestion = await callGemini(summaryPrompt, geminiApiKey);
           } catch (e) {
-            openingQuestion = `欢迎回来！上次我们聊到了${chapter}的一些美好回忆，今天我们继续深入聊聊。`;
+            openingQuestion = `欢迎回来！上次我们聊到了${actualChapter}的一些美好回忆，今天我们继续深入聊聊。`;
           }
         }
       }
@@ -968,7 +1120,7 @@ Deno.serve(async (req) => {
         .from('conversation_history')
         .select('*')
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .eq('session_id', sessionId)
         .order('round_number', { ascending: true });
 
@@ -985,13 +1137,13 @@ Deno.serve(async (req) => {
         .from('conversation_summary')
         .select('*')
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .single();
 
       // 生成问题
       const question = await generateSmartQuestion(
         userId,
-        chapter,
+        actualChapter,
         history || [],
         summary,
         supabase,
@@ -1004,7 +1156,7 @@ Deno.serve(async (req) => {
         .from('conversation_history')
         .insert({
           user_id: userId,
-          chapter: chapter,
+          chapter: actualChapter,
           session_id: sessionId,
           round_number: nextRoundNumber,
           question: question,
@@ -1034,12 +1186,33 @@ Deno.serve(async (req) => {
     }
 
     // 保存回答并获取下一个问题
-    if (action === 'saveAnswer') {
-      if (!userId || !chapter || !sessionId || !userAnswer || roundNumber === undefined) {
+    if (actionToUse === 'saveAnswer') {
+      if (!userId || !sessionId || !userAnswer || roundNumber === undefined) {
         return new Response(
-          JSON.stringify({ error: 'Missing required parameters' }),
+          JSON.stringify({ error: 'Missing required parameters', required: ['userId', 'sessionId', 'userAnswer', 'roundNumber'] }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
+      }
+
+      // chapter是可选的，如果没有提供，尝试从历史记录中获取
+      let actualChapter = chapter;
+      if (!actualChapter) {
+        // 从历史记录中获取chapter
+        const { data: historyRecord } = await supabase
+          .from('conversation_history')
+          .select('chapter')
+          .eq('user_id', userId)
+          .eq('session_id', sessionId)
+          .limit(1)
+          .single();
+        
+        if (historyRecord?.chapter) {
+          actualChapter = historyRecord.chapter;
+          console.log('Inferred chapter from history:', actualChapter);
+        } else {
+          actualChapter = '童年故里'; // 默认章节
+          console.log('Using default chapter:', actualChapter);
+        }
       }
 
       // 获取当前问题（从历史记录中）
@@ -1049,7 +1222,7 @@ Deno.serve(async (req) => {
         .from('conversation_history')
         .select('question, round_number')
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .eq('session_id', sessionId)
         .eq('round_number', roundNumber)
         .single();
@@ -1062,7 +1235,7 @@ Deno.serve(async (req) => {
           .from('conversation_history')
           .select('question, round_number')
           .eq('user_id', userId)
-          .eq('chapter', chapter)
+          .eq('chapter', actualChapter)
           .eq('session_id', sessionId)
           .eq('answer', '')
           .order('round_number', { ascending: false })
@@ -1094,7 +1267,7 @@ Deno.serve(async (req) => {
           user_answer: userAnswer  // Also update old column for compatibility
         })
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .eq('session_id', sessionId)
         .eq('round_number', actualRoundNumber);
 
@@ -1107,14 +1280,14 @@ Deno.serve(async (req) => {
       }
 
       // 更新摘要
-      await updateConversationSummary(userId, chapter, userAnswer, supabase, geminiApiKey);
+      await updateConversationSummary(userId, actualChapter, userAnswer, supabase, geminiApiKey);
 
       // 获取更新后的历史
       const { data: history } = await supabase
         .from('conversation_history')
         .select('*')
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .eq('session_id', sessionId)
         .order('round_number', { ascending: true });
 
@@ -1123,13 +1296,13 @@ Deno.serve(async (req) => {
         .from('conversation_summary')
         .select('*')
         .eq('user_id', userId)
-        .eq('chapter', chapter)
+        .eq('chapter', actualChapter)
         .single();
 
       // 生成下一个问题
       const nextQuestion = await generateSmartQuestion(
         userId,
-        chapter,
+        actualChapter,
         history || [],
         summary,
         supabase,
@@ -1142,7 +1315,7 @@ Deno.serve(async (req) => {
         .from('conversation_history')
         .insert({
           user_id: userId,
-          chapter: chapter,
+          chapter: actualChapter,
           session_id: sessionId,
           round_number: nextRoundNumber,
           question: nextQuestion,
@@ -1171,7 +1344,7 @@ Deno.serve(async (req) => {
     }
 
     // 内容分类功能
-    if (action === 'classifyContent') {
+    if (actionToUse === 'classifyContent') {
       const { text, chapter } = requestData;
       
       if (!text) {
@@ -1235,8 +1408,15 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 如果没有匹配到任何 action，返回错误
+    console.error('Invalid action:', actionToUse, 'Available actions: testGemini, getEnvInfo, generateUserAnswer, getNextQuestion, saveAnswer, classifyContent');
     return new Response(
-      JSON.stringify({ error: 'Invalid action' }),
+      JSON.stringify({ 
+        error: 'Invalid action',
+        received: actionToUse,
+        originalAction: action,
+        available: ['testGemini', 'getEnvInfo', 'generateUserAnswer', 'getNextQuestion', 'saveAnswer', 'classifyContent']
+      }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
