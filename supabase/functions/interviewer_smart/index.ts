@@ -857,7 +857,13 @@ Deno.serve(async (req) => {
       );
     }
     
-    const { action, userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
+    let { action, userId, chapter, sessionId, userAnswer, roundNumber } = requestData;
+
+    // 如果没有action，默认是getNextQuestion
+    if (!action) {
+      action = 'getNextQuestion';
+      console.log('No action provided, defaulting to getNextQuestion');
+    }
 
     console.log('Request received:', JSON.stringify({ action, userId, chapter, sessionId, roundNumber, hasUserAnswer: !!userAnswer }, null, 2));
     console.log('Full request data:', JSON.stringify(requestData, null, 2));
@@ -1058,28 +1064,37 @@ Deno.serve(async (req) => {
         );
       }
 
-      // chapter是可选的，如果没有提供，尝试从历史记录中获取
+      // chapter是可选的，如果没有提供，使用默认值或从历史记录中获取
       let actualChapter = chapter;
-      if (!actualChapter && sessionId) {
-        // 如果有sessionId，尝试从历史记录中获取chapter
-        const { data: historyRecord } = await supabase
-          .from('conversation_history')
-          .select('chapter')
-          .eq('user_id', userId)
-          .eq('session_id', sessionId)
-          .limit(1)
-          .single();
+      if (!actualChapter) {
+        // 尝试从历史记录中获取chapter
+        if (sessionId) {
+          const { data: historyRecord } = await supabase
+            .from('conversation_history')
+            .select('chapter')
+            .eq('user_id', userId)
+            .eq('session_id', sessionId)
+            .limit(1)
+            .single();
+          
+          if (historyRecord?.chapter) {
+            actualChapter = historyRecord.chapter;
+            console.log('Inferred chapter from history:', actualChapter);
+          }
+        }
         
-        if (historyRecord?.chapter) {
-          actualChapter = historyRecord.chapter;
-          console.log('Inferred chapter from history:', actualChapter);
+        // 如果还是没有chapter，使用默认值
+        if (!actualChapter) {
+          actualChapter = '童年故里';
+          console.log('Using default chapter:', actualChapter);
         }
       }
-      
-      // 如果还是没有chapter，使用默认值
-      if (!actualChapter) {
-        actualChapter = '童年故里'; // 默认章节
-        console.log('Using default chapter:', actualChapter);
+
+      // sessionId是可选的，如果没有提供，自动生成
+      let actualSessionId = sessionId;
+      if (!actualSessionId) {
+        actualSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log('Generated new sessionId:', actualSessionId);
       }
 
       // 检查是否有之前的session，如果有，生成总结开场
@@ -1088,7 +1103,7 @@ Deno.serve(async (req) => {
         .select('session_id')
         .eq('user_id', userId)
         .eq('chapter', actualChapter)
-        .neq('session_id', sessionId)
+        .neq('session_id', actualSessionId)
         .limit(1);
 
       let openingQuestion: string | null = null;
@@ -1100,7 +1115,7 @@ Deno.serve(async (req) => {
           .select('*')
           .eq('user_id', userId)
           .eq('chapter', actualChapter)
-          .neq('session_id', sessionId)
+          .neq('session_id', actualSessionId)
           .order('round_number', { ascending: true });
 
         if (previousHistory && previousHistory.length > 0 && geminiApiKey) {
@@ -1121,7 +1136,7 @@ Deno.serve(async (req) => {
         .select('*')
         .eq('user_id', userId)
         .eq('chapter', actualChapter)
-        .eq('session_id', sessionId)
+        .eq('session_id', actualSessionId)
         .order('round_number', { ascending: true });
 
       if (historyError) {
@@ -1157,7 +1172,7 @@ Deno.serve(async (req) => {
         .insert({
           user_id: userId,
           chapter: actualChapter,
-          session_id: sessionId,
+          session_id: actualSessionId,
           round_number: nextRoundNumber,
           question: question,
           answer: '',
@@ -1178,6 +1193,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           question: openingQuestion ? `${openingQuestion}\n\n${question}` : question,
           roundNumber: nextRoundNumber,
+          sessionId: actualSessionId,  // 返回生成的sessionId
           usingAI: !!geminiApiKey,
           isReturningUser: !!openingQuestion
         }),
